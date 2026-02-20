@@ -29,6 +29,12 @@ interface Props {
   usuarios: Usuario[];
   sucursales: Sucursal[];
   isAdmin: boolean;
+
+  // Nueva prop opcional
+  ocultarFiltroSucursal?: boolean;
+
+  // Si usas esta también:
+  verTodasSucursales?: boolean;
 }
 
 const METODOS_PAGO = [
