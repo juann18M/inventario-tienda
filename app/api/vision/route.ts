@@ -3,12 +3,10 @@ import OpenAI from "openai";
 import { db } from "@/lib/db";
 import { RowDataPacket } from "mysql2/promise";
 
-// 🔑 Inicializamos OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+// 1. Forzamos que sea dinámica para que Next no intente pre-renderizarla como estática
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-// 🔹 Interfaces para tipado
 interface Sucursal {
   nombre: string;
 }
@@ -21,25 +19,27 @@ interface Inventario {
 interface Producto {
   id: number;
   nombre: string;
-  inventarios?: Inventario[]; // Hacemos opcional para evitar crash si no viene de DB
+  inventarios?: Inventario[];
 }
 
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("image") as File;
-
-    if (!file) {
-      return NextResponse.json({ error: "No se recibió imagen" }, { status: 400 });
+    // 2. Verificación de API Key (Evita que truene si no existe en el build)
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json({ error: "OpenAI API Key no configurada" }, { status: 500 });
     }
 
-    const bytes = await file.arrayBuffer();
+    // Inicializamos dentro del POST para asegurar que las variables de entorno estén listas
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    const bytes = await req.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64Image = buffer.toString("base64");
 
-    // 🔥 1. Mandar imagen a OpenAI Vision
     const visionResponse = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Asegúrate de tener acceso a este modelo o usa gpt-4-turbo
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "user",
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
             {
               type: "image_url",
               image_url: {
-                url: `data:${file.type};base64,${base64Image}`,
+                url: `data:image/png;base64,${base64Image}`,
               },
             },
           ],
@@ -60,52 +60,46 @@ export async function POST(req: Request) {
     });
 
     const descripcion = visionResponse.choices[0].message.content?.toLowerCase() || "";
-    console.log("Detectado:", descripcion);
-
-    // 🔥 2. Buscar en la base de datos
-    // Nota: Es mejor buscar por palabras clave individuales para mejorar coincidencia
     const palabra = descripcion.split(" ")[0]; 
 
-    // ✅ Tipado correcto con RowDataPacket
+    // 3. Validación de la DB antes de la consulta
+    if (!db) {
+      throw new Error("La conexión a la base de datos no está disponible");
+    }
+
     const [rows] = await db.query<(Producto & RowDataPacket)[]>(
-      `
-      SELECT *
-      FROM productos
-      WHERE nombre LIKE ?
-      LIMIT 5
-      `,
+      `SELECT * FROM productos WHERE nombre LIKE ? LIMIT 5`,
       [`%${palabra}%`]
     );
 
-    // Cast seguro a Producto[]
     const productos: Producto[] = rows as Producto[];
 
     if (!productos.length) {
       return NextResponse.json({
         respuesta: `Detecté: "${descripcion}" pero no encontré coincidencias en inventario.`,
-        productos: [] // ✅ Importante: Devolver array vacío si no hay nada
+        productos: [],
       });
     }
 
-    // 🔥 3. Armar respuesta
     const resultado = productos.map((p: Producto) => {
-      // Usamos ?. (optional chaining) por si 'inventarios' no viene en la consulta SQL plana
-      const sucursales = p.inventarios
+      const sucursalesStr = p.inventarios
         ?.filter((i) => i.stock > 0)
         .map((i) => i.sucursal.nombre)
         .join(", ");
 
-      return `${p.nombre} disponible en: ${sucursales || "Sin stock o info de sucursal"}`;
+      return `${p.nombre} disponible en: ${sucursalesStr || "Sin stock"}`;
     });
 
-    // ✅ CORRECCIÓN PRINCIPAL: Incluir 'productos' en la respuesta JSON
     return NextResponse.json({
       respuesta: `Detecté: "${descripcion}".\n\n${resultado.join("\n")}`,
-      productos: productos, 
+      productos: productos,
     });
 
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: "Error procesando imagen" }, { status: 500 });
+  } catch (error: any) {
+    console.error("Error en /api/vision:", error);
+    return NextResponse.json(
+      { error: "Error procesando imagen", details: error.message }, 
+      { status: 500 }
+    );
   }
 }
