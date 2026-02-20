@@ -2,9 +2,26 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { db } from "@/lib/db";
 
+// 🔑 Inicializamos OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
+
+// 🔹 Interfaces para tipado
+interface Sucursal {
+  nombre: string;
+}
+
+interface Inventario {
+  stock: number;
+  sucursal: Sucursal;
+}
+
+interface Producto {
+  id: number;
+  nombre: string;
+  inventarios: Inventario[];
+}
 
 export async function POST(req: Request) {
   try {
@@ -17,7 +34,6 @@ export async function POST(req: Request) {
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-
     const base64Image = buffer.toString("base64");
 
     // 🔥 1. Mandar imagen a OpenAI Vision
@@ -42,23 +58,21 @@ export async function POST(req: Request) {
       ],
     });
 
-    const descripcion =
-      visionResponse.choices[0].message.content?.toLowerCase() || "";
-
+    const descripcion = visionResponse.choices[0].message.content?.toLowerCase() || "";
     console.log("Detectado:", descripcion);
 
-    // 🔥 2. Buscar en tu base de datos
-  const palabra = descripcion.split(" ")[0];
+    // 🔥 2. Buscar en la base de datos
+    const palabra = descripcion.split(" ")[0];
 
-const [productos]: any = await db.query(
-  `
-  SELECT *
-  FROM productos
-  WHERE nombre LIKE ?
-  LIMIT 5
-  `,
-  [`%${palabra}%`]
-);
+    const [productos]: Producto[][] = await db.query(
+      `
+      SELECT *
+      FROM productos
+      WHERE nombre LIKE ?
+      LIMIT 5
+      `,
+      [`%${palabra}%`]
+    );
 
     if (!productos.length) {
       return NextResponse.json({
@@ -67,7 +81,7 @@ const [productos]: any = await db.query(
     }
 
     // 🔥 3. Armar respuesta
-    const resultado = productos.map((p) => {
+    const resultado = productos.map((p: Producto) => {
       const sucursales = p.inventarios
         .filter((i) => i.stock > 0)
         .map((i) => i.sucursal.nombre)
