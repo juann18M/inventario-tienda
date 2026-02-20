@@ -5,8 +5,7 @@ export async function GET() {
   try {
     console.log("🔵 Iniciando consulta de reportes...");
 
-    // 🔹 Ventas totales (acumuladas)
-    const [ventas] = await db.query(`
+    const [ventas] = await db.query<any[]>(`
       SELECT 
         COUNT(*) as total_ventas,
         COALESCE(SUM(total), 0) as monto_total
@@ -14,15 +13,13 @@ export async function GET() {
       WHERE total > 0
     `);
 
-    // 🔹 Productos vendidos (acumulados)
-    const [productos] = await db.query(`
+    const [productos] = await db.query<any[]>(`
       SELECT 
         COALESCE(SUM(cantidad), 0) as productos_vendidos
       FROM detalle_venta
     `);
 
-    // 🔹 Ventas por día (últimos 7 días)
-    const [ventasPorDia] = await db.query(`
+    const [ventasPorDia] = await db.query<any[]>(`
       SELECT 
         DATE(fecha) as dia,
         COUNT(*) as cantidad_ventas,
@@ -34,8 +31,7 @@ export async function GET() {
       ORDER BY dia ASC
     `);
 
-    // 🔹 Ventas por método de pago
-    const [ventasPorMetodo] = await db.query(`
+    const [ventasPorMetodo] = await db.query<any[]>(`
       SELECT 
         metodo_pago,
         COUNT(*) as cantidad,
@@ -45,8 +41,7 @@ export async function GET() {
       GROUP BY metodo_pago
     `);
 
-    // 🔹 Top 5 productos más vendidos
-    const [topProductos] = await db.query(`
+    const [topProductos] = await db.query<any[]>(`
       SELECT 
         p.nombre,
         SUM(dv.cantidad) as total_vendido,
@@ -58,8 +53,7 @@ export async function GET() {
       LIMIT 5
     `);
 
-    // 🔹 Empleado top (acumulado)
-    const [empleado] = await db.query(`
+    const [empleado] = await db.query<any[]>(`
       SELECT 
         u.nombre, 
         COALESCE(SUM(v.total), 0) as total,
@@ -72,8 +66,7 @@ export async function GET() {
       LIMIT 1
     `);
 
-    // 🔹 Sucursal top (acumulado)
-    const [sucursal] = await db.query(`
+    const [sucursal] = await db.query<any[]>(`
       SELECT 
         s.nombre, 
         COALESCE(SUM(v.total), 0) as total,
@@ -86,8 +79,7 @@ export async function GET() {
       LIMIT 1
     `);
 
-    // 🔹 Totales acumulados por mes
-    const [ventasPorMes] = await db.query(`
+    const [ventasPorMes] = await db.query<any[]>(`
       SELECT 
         DATE_FORMAT(fecha, '%Y-%m') as mes,
         COUNT(*) as cantidad_ventas,
