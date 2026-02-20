@@ -472,7 +472,7 @@ export default function ReportesPage() {
                     fill="#8884d8"
                     paddingAngle={2}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }) => `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`}
                     labelLine={{ stroke: '#9CA3AF', strokeWidth: 1 }}
                   >
                     {metodosPagoData.map((entry: any, index: number) => (
