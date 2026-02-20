@@ -48,21 +48,17 @@ export async function POST(req: Request) {
     console.log("Detectado:", descripcion);
 
     // 🔥 2. Buscar en tu base de datos
-    const productos = await db.producto.findMany({
-      where: {
-        nombre: {
-          contains: descripcion.split(" ")[0], // búsqueda básica
-          mode: "insensitive",
-        },
-      },
-      include: {
-        inventarios: {
-          include: {
-            sucursal: true,
-          },
-        },
-      },
-    });
+  const palabra = descripcion.split(" ")[0];
+
+const [productos]: any = await db.query(
+  `
+  SELECT *
+  FROM productos
+  WHERE nombre LIKE ?
+  LIMIT 5
+  `,
+  [`%${palabra}%`]
+);
 
     if (!productos.length) {
       return NextResponse.json({
