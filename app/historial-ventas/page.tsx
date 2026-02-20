@@ -89,13 +89,15 @@ export default function HistorialVentasPage() {
   const [verTodasSucursales, setVerTodasSucursales] = useState(false);
 
   // Filtros - SIN incluir sucursalId por defecto
-  const [filtros, setFiltros] = useState({
-    fechaInicio: "",
-    fechaFin: "",
-    usuarioId: "",
-    metodoPago: "",
-    cliente: ""
-  });
+  // Alrededor de la línea 83
+const [filtros, setFiltros] = useState({
+  fechaInicio: "",
+  fechaFin: "",
+  usuarioId: "",
+  metodoPago: "",
+  cliente: "",
+  sucursalId: "" // 👈 AGREGA ESTA LÍNEA AQUÍ
+});
 
   const [filtrosActivos, setFiltrosActivos] = useState(0);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -242,7 +244,8 @@ export default function HistorialVentasPage() {
       fechaFin: "",
       usuarioId: "",
       metodoPago: "",
-      cliente: ""
+      cliente: "",
+      sucursalId: ""
     });
     // No cambiar el estado de verTodasSucursales ni sucursalActiva
     cargarVentas(1);
