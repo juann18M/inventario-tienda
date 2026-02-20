@@ -64,7 +64,8 @@ export async function POST(req: Request) {
     // 🔥 2. Buscar en la base de datos
     const palabra = descripcion.split(" ")[0];
 
-    const [productos]: Producto[][] = await db.query(
+    // ✅ Tipado correcto de db.query
+    const [productos] = await db.query<Producto[]>(
       `
       SELECT *
       FROM productos
