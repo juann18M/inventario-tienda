@@ -21,7 +21,7 @@ interface Inventario {
 interface Producto {
   id: number;
   nombre: string;
-  inventarios: Inventario[];
+  inventarios?: Inventario[]; // Hacemos opcional para evitar crash si no viene de DB
 }
 
 export async function POST(req: Request) {
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
 
     // 🔥 1. Mandar imagen a OpenAI Vision
     const visionResponse = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o-mini", // Asegúrate de tener acceso a este modelo o usa gpt-4-turbo
       messages: [
         {
           role: "user",
@@ -63,7 +63,8 @@ export async function POST(req: Request) {
     console.log("Detectado:", descripcion);
 
     // 🔥 2. Buscar en la base de datos
-    const palabra = descripcion.split(" ")[0];
+    // Nota: Es mejor buscar por palabras clave individuales para mejorar coincidencia
+    const palabra = descripcion.split(" ")[0]; 
 
     // ✅ Tipado correcto con RowDataPacket
     const [rows] = await db.query<(Producto & RowDataPacket)[]>(
@@ -82,22 +83,27 @@ export async function POST(req: Request) {
     if (!productos.length) {
       return NextResponse.json({
         respuesta: `Detecté: "${descripcion}" pero no encontré coincidencias en inventario.`,
+        productos: [] // ✅ Importante: Devolver array vacío si no hay nada
       });
     }
 
     // 🔥 3. Armar respuesta
     const resultado = productos.map((p: Producto) => {
+      // Usamos ?. (optional chaining) por si 'inventarios' no viene en la consulta SQL plana
       const sucursales = p.inventarios
-        .filter((i) => i.stock > 0)
+        ?.filter((i) => i.stock > 0)
         .map((i) => i.sucursal.nombre)
         .join(", ");
 
-      return `${p.nombre} disponible en: ${sucursales || "Sin stock"}`;
+      return `${p.nombre} disponible en: ${sucursales || "Sin stock o info de sucursal"}`;
     });
 
+    // ✅ CORRECCIÓN PRINCIPAL: Incluir 'productos' en la respuesta JSON
     return NextResponse.json({
       respuesta: `Detecté: "${descripcion}".\n\n${resultado.join("\n")}`,
+      productos: productos, 
     });
+
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: "Error procesando imagen" }, { status: 500 });
