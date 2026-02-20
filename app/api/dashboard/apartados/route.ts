@@ -1,7 +1,7 @@
 // app/api/dashboard/apartados/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
