@@ -121,7 +121,7 @@ sd.nombre AS sucursal_destino,
         usuario_rol: traslado.usuario_rol,
         total_productos: Number(traslado.total_productos),
         total_cantidad: Number(traslado.total_cantidad),
-        detalles: detalles.map(d => ({
+        detalles: (detalles as any[]).map((d: any) => ({
           id: d.id,
           id_producto: d.id_producto,
           cantidad: Number(d.cantidad),
