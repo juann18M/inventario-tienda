@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { db } from "@/lib/db";
+import { RowDataPacket } from "mysql2/promise";
 
 // 🔑 Inicializamos OpenAI
 const openai = new OpenAI({
@@ -64,8 +65,8 @@ export async function POST(req: Request) {
     // 🔥 2. Buscar en la base de datos
     const palabra = descripcion.split(" ")[0];
 
-    // ✅ Tipado correcto de db.query
-    const [productos] = await db.query<Producto[]>(
+    // ✅ Tipado correcto con RowDataPacket
+    const [rows] = await db.query<(Producto & RowDataPacket)[]>(
       `
       SELECT *
       FROM productos
@@ -74,6 +75,9 @@ export async function POST(req: Request) {
       `,
       [`%${palabra}%`]
     );
+
+    // Cast seguro a Producto[]
+    const productos: Producto[] = rows as Producto[];
 
     if (!productos.length) {
       return NextResponse.json({
