@@ -6,6 +6,7 @@ interface Mensaje {
   tipo: "usuario" | "sistema";
   mensaje: string;
   fecha?: string;
+  productos?: any[]; // 👈 Agregamos esto para que TS lo reconozca
 }
 
 export interface Producto {
