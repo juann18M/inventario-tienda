@@ -3,9 +3,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-/* =========================
-   GET - Obtener caja actual o historial
-========================= */
+/* =====================================================
+   GET — Caja actual o historial
+===================================================== */
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
 
@@ -18,15 +18,20 @@ export async function GET(req: Request) {
     const historial = searchParams.get("historial") === "true";
 
     const user = session.user as any;
-    const userRole = user.role?.toLowerCase();
-    const sucursalId = user.sucursal_id;
+    const role = user?.role?.toLowerCase?.() ?? "";
+    const sucursalId = Number(user?.sucursal_id);
 
-    /* =========================
-       HISTORIAL
-    ========================= */
+    if (!sucursalId) {
+      return NextResponse.json(
+        { error: "Usuario sin sucursal asignada" },
+        { status: 400 }
+      );
+    }
+
+    /* ================= HISTORIAL ================= */
     if (historial) {
       let query = `
-        SELECT c.*, u.nombre as usuario_nombre
+        SELECT c.*, u.nombre AS usuario_nombre
         FROM cajas c
         JOIN usuarios u ON c.usuario_id = u.id
         WHERE 1=1
@@ -34,7 +39,7 @@ export async function GET(req: Request) {
 
       const params: any[] = [];
 
-      if (userRole !== "admin" && userRole !== "jefe") {
+      if (role !== "admin" && role !== "jefe") {
         query += ` AND c.usuario_id = ?`;
         params.push(user.id);
       }
@@ -42,15 +47,14 @@ export async function GET(req: Request) {
       query += ` ORDER BY c.fecha DESC, c.id DESC`;
 
       const [rows]: any = await db.query(query, params);
-      return NextResponse.json({ data: rows });
+
+      return NextResponse.json({ data: rows ?? [] });
     }
 
-    /* =========================
-       CAJA ABIERTA ACTUAL
-    ========================= */
+    /* ================= CAJA ABIERTA ================= */
     const [rows]: any = await db.query(
       `
-      SELECT c.*, u.nombre as usuario_nombre
+      SELECT c.*, u.nombre AS usuario_nombre
       FROM cajas c
       JOIN usuarios u ON c.usuario_id = u.id
       WHERE c.sucursal_id = ?
@@ -58,13 +62,13 @@ export async function GET(req: Request) {
       ORDER BY c.id DESC
       LIMIT 1
       `,
-      [Number(sucursalId)]
+      [sucursalId]
     );
 
-    return NextResponse.json({ data: rows });
-
+    return NextResponse.json({ data: rows ?? [] });
   } catch (error) {
     console.error("❌ Error GET caja:", error);
+
     return NextResponse.json(
       { error: "Error al obtener caja" },
       { status: 500 }
@@ -72,9 +76,9 @@ export async function GET(req: Request) {
   }
 }
 
-/* =========================
-   POST - Abrir Caja
-========================= */
+/* =====================================================
+   POST — Abrir Caja
+===================================================== */
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
 
@@ -83,42 +87,42 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { monto_inicial } = await req.json();
-    const user = session.user as any;
+    const body = await req.json();
+    const montoInicial = Number(body.monto_inicial);
 
-    if (!monto_inicial || Number(monto_inicial) < 0) {
+    if (!Number.isFinite(montoInicial) || montoInicial < 0) {
       return NextResponse.json(
         { error: "Monto inicial inválido" },
         { status: 400 }
       );
     }
 
-    // Verificar si ya existe caja abierta
+    const user = session.user as any;
+
+    /* ===== verificar caja abierta ===== */
     const [existente]: any = await db.query(
-      `
-      SELECT id FROM cajas
-      WHERE sucursal_id = ?
-      AND estado = 'ABIERTA'
-      LIMIT 1
-      `,
+      `SELECT id FROM cajas
+       WHERE sucursal_id = ?
+       AND estado='ABIERTA'
+       LIMIT 1`,
       [user.sucursal_id]
     );
 
-    if (existente.length) {
+    if (existente.length > 0) {
       return NextResponse.json(
         { error: "Ya existe una caja abierta" },
         { status: 400 }
       );
     }
 
-    const montoInicial = Number(monto_inicial);
-
+    /* ===== crear caja ===== */
     const [result]: any = await db.query(
       `
       INSERT INTO cajas
-      (sucursal_id, usuario_id, fecha, monto_inicial, monto_final,
-       total_ventas, total_transacciones, total_apartados,
-       estado, observaciones)
+      (sucursal_id, usuario_id, fecha,
+       monto_inicial, monto_final,
+       total_ventas, total_transacciones,
+       total_apartados, estado, observaciones)
       VALUES (?, ?, CURDATE(), ?, ?, 0, 0, 0, 'ABIERTA', ?)
       `,
       [
@@ -126,11 +130,11 @@ export async function POST(req: Request) {
         user.id,
         montoInicial,
         montoInicial,
-        "Apertura de caja"
+        "Apertura de caja",
       ]
     );
 
-    // Registrar movimiento
+    /* ===== movimiento ===== */
     await db.query(
       `
       INSERT INTO movimientos_caja
@@ -141,9 +145,9 @@ export async function POST(req: Request) {
     );
 
     return NextResponse.json({ success: true });
-
   } catch (error) {
-    console.error("❌ Error POST abrir caja:", error);
+    console.error("❌ Error POST caja:", error);
+
     return NextResponse.json(
       { error: "Error al abrir caja" },
       { status: 500 }
@@ -151,9 +155,9 @@ export async function POST(req: Request) {
   }
 }
 
-/* =========================
-   PATCH - Ajustar o Cerrar Caja
-========================= */
+/* =====================================================
+   PATCH — Ajustar o Cerrar Caja
+===================================================== */
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
 
@@ -162,11 +166,30 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const { id, monto_inicial, monto_final } = await req.json();
+    const body = await req.json();
+
+    const id = Number(body.id);
+    const montoInicial =
+      body.monto_inicial !== undefined
+        ? Number(body.monto_inicial)
+        : undefined;
+
+    const montoFinal =
+      body.monto_final !== undefined
+        ? Number(body.monto_final)
+        : undefined;
+
+    if (!Number.isFinite(id)) {
+      return NextResponse.json(
+        { error: "ID inválido" },
+        { status: 400 }
+      );
+    }
+
     const user = session.user as any;
 
     const [rows]: any = await db.query(
-      "SELECT * FROM cajas WHERE id = ?",
+      `SELECT * FROM cajas WHERE id=? LIMIT 1`,
       [id]
     );
 
@@ -179,72 +202,81 @@ export async function PATCH(req: Request) {
 
     const caja = rows[0];
 
-    /* =========================
-       1️⃣ AJUSTAR MONTO INICIAL
-    ========================= */
-    if (monto_inicial !== undefined && monto_final === undefined) {
+    /* ================= AJUSTE INICIAL ================= */
+    if (montoInicial !== undefined && montoFinal === undefined) {
+      if (!Number.isFinite(montoInicial)) {
+        return NextResponse.json(
+          { error: "Monto inválido" },
+          { status: 400 }
+        );
+      }
 
-      const nuevoMontoInicial = Number(monto_inicial);
-      const diferencia = nuevoMontoInicial - Number(caja.monto_inicial);
+      const diferencia =
+        montoInicial - Number(caja.monto_inicial);
 
       await db.query(
         `
         UPDATE cajas
-        SET monto_inicial = ?,
-            monto_final = monto_final + ?
-        WHERE id = ?
+        SET monto_inicial=?,
+            monto_final=monto_final+?
+        WHERE id=?
         `,
-        [nuevoMontoInicial, diferencia, id]
+        [montoInicial, diferencia, id]
       );
 
       await db.query(
         `
         INSERT INTO movimientos_caja
-        (caja_id, tipo, monto, descripcion, usuario_id)
+        (caja_id,tipo,monto,descripcion,usuario_id)
         VALUES (?, 'AJUSTE_INICIAL', ?, ?, ?)
         `,
-        [
-          id,
-          diferencia,
-          "Ajuste de monto inicial",
-          user.id
-        ]
+        [id, diferencia, "Ajuste monto inicial", user.id]
       );
 
       return NextResponse.json({ success: true });
     }
 
-    /* =========================
-       2️⃣ CERRAR CAJA
-    ========================= */
-    if (monto_final !== undefined) {
+    /* ================= CIERRE CAJA ================= */
+    if (montoFinal !== undefined) {
+      if (caja.estado === "CERRADA") {
+        return NextResponse.json(
+          { error: "La caja ya está cerrada" },
+          { status: 400 }
+        );
+      }
 
-      const montoSistema = Number(caja.monto_final);
-      const montoDeclarado = Number(monto_final);
-      const diferencia = montoDeclarado - montoSistema;
+      if (!Number.isFinite(montoFinal)) {
+        return NextResponse.json(
+          { error: "Monto final inválido" },
+          { status: 400 }
+        );
+      }
+
+      const diferencia =
+        montoFinal - Number(caja.monto_final);
 
       await db.query(
         `
         UPDATE cajas
-        SET monto_final = ?,
-            estado = 'CERRADA',
-            fecha_cierre = NOW()
-        WHERE id = ?
+        SET monto_final=?,
+            estado='CERRADA',
+            fecha_cierre=NOW()
+        WHERE id=?
         `,
-        [montoDeclarado, id]
+        [montoFinal, id]
       );
 
       await db.query(
         `
         INSERT INTO movimientos_caja
-        (caja_id, tipo, monto, descripcion, usuario_id)
+        (caja_id,tipo,monto,descripcion,usuario_id)
         VALUES (?, 'CIERRE', ?, ?, ?)
         `,
         [
           id,
           diferencia,
           `Cierre de caja. Diferencia: ${diferencia}`,
-          user.id
+          user.id,
         ]
       );
 
@@ -255,9 +287,9 @@ export async function PATCH(req: Request) {
       { error: "Operación no válida" },
       { status: 400 }
     );
-
   } catch (error) {
     console.error("❌ Error PATCH caja:", error);
+
     return NextResponse.json(
       { error: "Error al actualizar caja" },
       { status: 500 }
