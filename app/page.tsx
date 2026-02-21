@@ -20,14 +20,13 @@ import {
   ShoppingBag,
 } from "lucide-react";
 
-// ✅ TIPO CORREGIDO: ahora usa sucursal_nombre y sucursal_id
+// ✅ TIPO CORREGIDO
 type SessionUser = {
   name?: string | null;
   role?: string;
-  sucursal_nombre?: string | null; // 👈 campo correcto para el nombre
-  sucursal_id?: number;             // 👈 nuevo campo para el ID
+  sucursal_nombre?: string | null;
+  sucursal_id?: number;
   id?: number;
-  
 };
 
 interface Notificacion {
@@ -117,13 +116,13 @@ export default function Home() {
 
   /* ================= HELPERS ================= */
 
-  const obtenerCajaActual = async (sucursal?: string) => {
-    const sucursalAUsar = sucursal || sucursalActiva;
-    if (!sucursalAUsar) return null;
+  const obtenerCajaActual = async () => {
+    const user = session?.user as SessionUser;
+    if (!user?.sucursal_id) return null;
 
     try {
       const res = await fetch(
-        `/api/dashboard/caja?sucursal=${encodeURIComponent(sucursalAUsar)}`,
+        `/api/dashboard/caja?sucursal_id=${user.sucursal_id}`,
         { cache: 'no-store' }
       );
       const json = await res.json();
@@ -138,12 +137,15 @@ export default function Home() {
     }
   };
 
-  const sincronizarCaja = async (sucursal: string) => {
+  const sincronizarCaja = async () => {
+    const user = session?.user as SessionUser;
+    if (!user?.sucursal_id) return false;
+
     try {
-      console.log("🔍 Sincronizando caja para:", sucursal);
+      console.log("🔍 Sincronizando caja para sucursal ID:", user.sucursal_id);
 
       const res = await fetch(
-        `/api/dashboard/caja?sucursal=${encodeURIComponent(sucursal)}`
+        `/api/dashboard/caja?sucursal_id=${user.sucursal_id}`
       );
 
       const json = await res.json();
@@ -182,20 +184,18 @@ export default function Home() {
   /* ================= DATA ================= */
 
   const fetchDashboardData = useCallback(
-    async (sucursal: string) => {
+    async () => {
       try {
         setIsLoading(true);
         
-        console.log("📊 Fetching data para sucursal:", sucursal);
-
         const user = session?.user as SessionUser;
         const isAdmin = user?.role?.toLowerCase() === "admin";
 
         // Caja - SOLO para empleados
-        if (!isAdmin) {
-          const cajaExiste = await sincronizarCaja(sucursal);
+        if (!isAdmin && user?.sucursal_id) {
+          const cajaExiste = await sincronizarCaja();
 
-          const storageKey = `caja_apertura_${sucursal}_${new Date().toDateString()}`;
+          const storageKey = `caja_apertura_${user.sucursal_id}_${new Date().toDateString()}`;
           const yaPreguntada = sessionStorage.getItem(storageKey);
 
           if (!cajaExiste && !yaPreguntada) {
@@ -210,42 +210,44 @@ export default function Home() {
         }
 
         // Estadísticas
-        const resStats = await fetch(
-          `/api/dashboard/stats?sucursal=${encodeURIComponent(sucursal)}`,
-          { cache: 'no-store' }
-        );
-        const jsonStats = await resStats.json();
+        if (user?.sucursal_id) {
+          const resStats = await fetch(
+            `/api/dashboard/stats?sucursal_id=${user.sucursal_id}`,
+            { cache: 'no-store' }
+          );
+          const jsonStats = await resStats.json();
 
-        if (jsonStats.success) {
-          setVentasHoy(Number(jsonStats.totalVentas || 0));
-          setApartadosActivos(Number(jsonStats.apartadosActivos || 0));
-          setApartadosPendientes(Number(jsonStats.apartadosPendientes || 0));
-          setVentasCount(Number(jsonStats.cantidadVentas || 0));
-          setStockBajo(Number(jsonStats.stockBajo || 0));
-          setVentasSemana(jsonStats.ventasSemana || [0,0,0,0,0,0,0]);
-          
-          // Datos para alertas
-          setProductosLentos(jsonStats.productosLentos || []);
-          setClientesPendientesHoy(jsonStats.clientesPendientes || []);
-          setProductoTopHoy(jsonStats.productoTopHoy || null);
-          
-          // Notificaciones
-          if (jsonStats.apartadosPendientes > 0) {
-            addNotificacion(
-              "Apartados Pendientes",
-              `${jsonStats.apartadosPendientes} apartado${jsonStats.apartadosPendientes !== 1 ? 's' : ''} por cobrar hoy`,
-              'apartado',
-              '/apartados?filter=pendientes'
-            );
-          }
-          
-          if (jsonStats.stockBajo > 0) {
-            addNotificacion(
-              "Stock Bajo",
-              `${jsonStats.stockBajo} producto${jsonStats.stockBajo !== 1 ? 's' : ''} con stock crítico`,
-              'inventario',
-              '/inventario?filter=stockBajo'
-            );
+          if (jsonStats.success) {
+            setVentasHoy(Number(jsonStats.totalVentas || 0));
+            setApartadosActivos(Number(jsonStats.apartadosActivos || 0));
+            setApartadosPendientes(Number(jsonStats.apartadosPendientes || 0));
+            setVentasCount(Number(jsonStats.cantidadVentas || 0));
+            setStockBajo(Number(jsonStats.stockBajo || 0));
+            setVentasSemana(jsonStats.ventasSemana || [0,0,0,0,0,0,0]);
+            
+            // Datos para alertas
+            setProductosLentos(jsonStats.productosLentos || []);
+            setClientesPendientesHoy(jsonStats.clientesPendientes || []);
+            setProductoTopHoy(jsonStats.productoTopHoy || null);
+            
+            // Notificaciones
+            if (jsonStats.apartadosPendientes > 0) {
+              addNotificacion(
+                "Apartados Pendientes",
+                `${jsonStats.apartadosPendientes} apartado${jsonStats.apartadosPendientes !== 1 ? 's' : ''} por cobrar hoy`,
+                'apartado',
+                '/apartados?filter=pendientes'
+              );
+            }
+            
+            if (jsonStats.stockBajo > 0) {
+              addNotificacion(
+                "Stock Bajo",
+                `${jsonStats.stockBajo} producto${jsonStats.stockBajo !== 1 ? 's' : ''} con stock crítico`,
+                'inventario',
+                '/inventario?filter=stockBajo'
+              );
+            }
           }
         }
       } catch (err) {
@@ -262,32 +264,27 @@ export default function Home() {
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
 
-    // ✅ LÓGICA CORREGIDA PARA SUCURSALES
     const user = session.user as SessionUser;
     const userRol = String(user.role || "").toLowerCase();
     setRol(userRol);
 
     let sucursal: string | null = null;
 
-    // Los admin pueden cambiar de sucursal (guardada en localStorage)
     if (userRol === "admin") {
       sucursal = localStorage.getItem("sucursalActiva") || SUCURSALES_LISTA[0];
       console.log("👑 Admin usando sucursal:", sucursal);
     } else {
-      // Los empleados tienen su sucursal fija del perfil
-      sucursal = user.sucursal_nombre || null; // 👈 ahora usa el campo correcto
+      sucursal = user.sucursal_nombre || null;
       console.log("🧑‍💼 Empleado con sucursal asignada:", sucursal);
     }
 
-    // Validación crítica
     if (!sucursal) {
       console.error("⛔ Usuario sin sucursal asignada", { user, userRol });
-      // Aquí podrías mostrar un mensaje de error al usuario
       return;
     }
 
     setSucursalActiva(sucursal);
-    fetchDashboardData(sucursal);
+    fetchDashboardData();
     
     addNotificacion(
       "Bienvenido",
@@ -304,6 +301,8 @@ export default function Home() {
     if (!montoInicial || Number(montoInicial) <= 0) return;
 
     try {
+      const user = session?.user as SessionUser;
+      
       console.log("📤 Enviando datos:", {
         monto_inicial: Number(montoInicial),
         sucursal: sucursalActiva
@@ -324,13 +323,13 @@ export default function Home() {
       if (!res.ok && json.error?.includes("Ya existe")) {
         console.log("Caja ya existía, sincronizando...");
         
-        await sincronizarCaja(sucursalActiva!);
+        await sincronizarCaja();
         setModalMontoInicial(false);
         return;
       }
 
       if (res.ok) {
-        await sincronizarCaja(sucursalActiva!);
+        await sincronizarCaja();
         setModalMontoInicial(false);
         
         addNotificacion(
@@ -348,47 +347,45 @@ export default function Home() {
       alert("Error de conexión al abrir caja");
     }
   };
-const handlerActualizar = async () => {
-  try {
-    if (!cajaId) {
-      alert("No hay caja activa");
-      return;
+
+  const handlerActualizar = async () => {
+    try {
+      if (!cajaId) {
+        alert("No hay caja activa");
+        return;
+      }
+
+      const body: any = { id: cajaId };
+
+      if (tabCaja === "inicial") {
+        body.monto_inicial = Number(montoInicial);
+      }
+
+      if (tabCaja === "final") {
+        body.monto_final = Number(montoFinal);
+      }
+
+      const res = await fetch("/api/dashboard/caja", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        alert(json.error || "Error al actualizar caja");
+        return;
+      }
+
+      setModalActualizarCaja(false);
+      await sincronizarCaja();
+
+    } catch (error) {
+      console.error("Error al actualizar:", error);
+      alert("Error al actualizar caja");
     }
-
-    const body: any = { id: cajaId };
-
-    if (tabCaja === "inicial") {
-      body.monto_inicial = Number(montoInicial);
-    }
-
-    if (tabCaja === "final") {
-      body.monto_final = Number(montoFinal);
-    }
-
-    const res = await fetch("/api/dashboard/caja", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-
-    const json = await res.json();
-
-    if (!res.ok) {
-      alert(json.error || "Error al actualizar caja");
-      return;
-    }
-
-    // ✅ Cerrar modal inmediatamente
-    setModalActualizarCaja(false);
-
-    // ✅ Sincronizar datos reales
-    await sincronizarCaja(sucursalActiva!);
-
-  } catch (error) {
-    console.error("Error al actualizar:", error);
-    alert("Error al actualizar caja");
-  }
-};
+  };
 
   const handleCambioSucursal = async (nuevaSucursal: string) => {
     setSucursalActiva(nuevaSucursal);
@@ -401,7 +398,7 @@ const handlerActualizar = async () => {
     setMontoInicial(0);
     setMontoFinal(0);
 
-    await fetchDashboardData(nuevaSucursal);
+    await fetchDashboardData();
   };
 
   const handlerFinalizar = async () => {
@@ -439,7 +436,7 @@ const handlerActualizar = async () => {
 
   const handleCerrarSesion = async () => {
     const caja = await obtenerCajaActual();
-    if (caja && Number(caja.monto_final) === 0) {
+    if (caja && Number(caja.monto_final) === Number(caja.monto_inicial)) {
       setModalMontoFinal(true);
     } else {
       const keys = Object.keys(sessionStorage);
@@ -509,10 +506,6 @@ const handlerActualizar = async () => {
                   {sucursalActiva || "Cargando..."}
                 </span>
               )}
-              {/* DEBUG: muestra la sucursal real */}
-              <span className="text-[6px] text-gray-300 mt-1">
-                ID: {sucursalActiva}
-              </span>
             </div>
           </div>
 
