@@ -149,6 +149,20 @@ export async function POST(req: NextRequest) {
   [totalVenta, totalVenta, cajaId]
 );
 
+await db.query(
+  `
+  INSERT INTO movimientos_caja
+  (caja_id, tipo, referencia_id, monto, descripcion)
+  VALUES (?, 'VENTA', ?, ?, ?)
+  `,
+  [
+    cajaId,
+    ventaId,
+    totalVenta,
+    `Venta #${ventaId}`
+  ]
+);
+
     console.log(`✅ Venta #${ventaId} registrada. Total: $${totalVenta} sumado a caja ${cajaId}`);
 
     return NextResponse.json({
