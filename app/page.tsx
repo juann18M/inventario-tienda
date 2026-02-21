@@ -116,27 +116,6 @@ export default function Home() {
 
   /* ================= HELPERS ================= */
 
-  const obtenerCajaActual = async () => {
-    const user = session?.user as SessionUser;
-    if (!user?.sucursal_id) return null;
-
-    try {
-      const res = await fetch(
-        `/api/dashboard/caja?sucursal_id=${user.sucursal_id}`,
-        { cache: 'no-store' }
-      );
-      const json = await res.json();
-      
-      if (json?.data && json.data.length > 0) {
-        return json.data[0];
-      }
-      return null;
-    } catch (error) {
-      console.error("Error al obtener caja:", error);
-      return null;
-    }
-  };
-
   const sincronizarCaja = async () => {
     const user = session?.user as SessionUser;
     if (!user?.sucursal_id) return false;
@@ -322,15 +301,8 @@ export default function Home() {
         return;
       }
 
-      // 🔥 Esperar sincronización real
-      const cajaActual = await obtenerCajaActual();
-
-      if (cajaActual) {
-        setCajaId(cajaActual.id);
-        setMontoInicial(Number(cajaActual.monto_inicial));
-        setMontoFinal(Number(cajaActual.monto_final));
-      }
-
+      // Esperar sincronización real
+      await sincronizarCaja();
       setModalMontoInicial(false);
 
     } catch (error) {
@@ -394,19 +366,30 @@ export default function Home() {
 
   const handlerFinalizar = async () => {
     try {
-      const caja = await obtenerCajaActual();
+      if (!cajaId) {
+        alert("No hay caja activa");
+        return;
+      }
 
-      if (caja) {
-        if (!montoFinal || Number(montoFinal) <= 0) return;
+      if (!montoFinal || Number(montoFinal) <= 0) {
+        alert("Ingresa un monto final válido");
+        return;
+      }
 
-        await fetch("/api/dashboard/caja", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: caja.id,
-            monto_final: Number(montoFinal)
-          })
-        });
+      const res = await fetch("/api/dashboard/caja", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: cajaId,
+          monto_final: Number(montoFinal)
+        })
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        alert(json.error || "Error al cerrar caja");
+        return;
       }
 
       const keys = Object.keys(sessionStorage);
@@ -416,18 +399,20 @@ export default function Home() {
         }
       });
 
+      setModalMontoFinal(false);
+      
       setTimeout(() => {
         signOut({ callbackUrl: "/login" });
       }, 500);
       
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
+      alert("Error al cerrar caja");
     }
   };
 
   const handleCerrarSesion = async () => {
-    const caja = await obtenerCajaActual();
-    if (caja && Number(caja.monto_final) === Number(caja.monto_inicial)) {
+    if (cajaId && montoInicial !== "" && montoFinal !== "" && Number(montoFinal) === Number(montoInicial)) {
       setModalMontoFinal(true);
     } else {
       const keys = Object.keys(sessionStorage);
