@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import { 
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area
 } from 'recharts';
@@ -26,9 +26,11 @@ import {
   AlertCircle,
   Loader2,
   Eye,
-  EyeOff
+  EyeOff,
+  ChevronDown
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useSession } from "next-auth/react";
 
 interface Toast {
   id: number;
@@ -36,7 +38,13 @@ interface Toast {
   type: 'success' | 'error' | 'warning';
 }
 
+interface Sucursal {
+  id: number;
+  nombre: string;
+}
+
 export default function ReportesPage() {
+  const { data: session, status } = useSession();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +52,30 @@ export default function ReportesPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [mostrarMetricas, setMostrarMetricas] = useState(true);
   const [periodo, setPeriodo] = useState('7dias');
+  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  const [sucursalSeleccionada, setSucursalSeleccionada] = useState<string>('todas');
+  const [cargandoSucursales, setCargandoSucursales] = useState(false);
 
-  // Colores solo para gráficas
+  // Verificar si el usuario es admin
+  const user: any = session?.user;
+  const isAdmin = user?.role?.toLowerCase() === "admin";
+
+  // Mapa de nombres de sucursal a IDs (igual que en ventas)
+  const SUCURSALES_MAP: Record<string, number> = {
+    "Centro Isidro Huarte 1": 1,
+    "Centro Isidro Huarte 2": 2,
+    "Santiago Tapia": 3,
+    "Guadalupe Victoria": 4,
+  };
+
+  const ID_SUCURSALES_MAP: Record<number, string> = {
+    1: "Centro Isidro Huarte 1",
+    2: "Centro Isidro Huarte 2",
+    3: "Santiago Tapia",
+    4: "Guadalupe Victoria",
+  };
+
+  // Colores para gráficas
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
   // Sistema de notificaciones
@@ -57,12 +87,85 @@ export default function ReportesPage() {
     }, 4000);
   };
 
+  // Cargar sucursales y establecer la seleccionada por defecto desde localStorage
+  useEffect(() => {
+    if (isAdmin) {
+      setCargandoSucursales(true);
+      
+      // Obtener la sucursal activa del localStorage (la que seleccionó en inicio)
+      const sucursalActiva = localStorage.getItem("sucursalActiva");
+      
+      fetch("/api/sucursales")
+        .then(async (res) => {
+          if (!res.ok) throw new Error("Error al cargar sucursales");
+          return res.json();
+        })
+        .then((data) => {
+          setSucursales(data);
+          
+          // Si hay una sucursal activa en localStorage, seleccionarla por defecto
+          if (sucursalActiva && SUCURSALES_MAP[sucursalActiva]) {
+            const id = SUCURSALES_MAP[sucursalActiva].toString();
+            setSucursalSeleccionada(id);
+          } else {
+            // Si no, usar la sucursal del usuario o la primera
+            const userSucursal = user?.sucursal;
+            if (userSucursal && SUCURSALES_MAP[userSucursal]) {
+              setSucursalSeleccionada(SUCURSALES_MAP[userSucursal].toString());
+            }
+          }
+        })
+        .catch((err) => {
+          console.error("Error cargando sucursales:", err);
+          addToast("Error al cargar sucursales", "error");
+        })
+        .finally(() => {
+          setCargandoSucursales(false);
+        });
+    } else {
+      // Si no es admin, usar su sucursal asignada
+      const userSucursalId = user?.sucursal_id;
+      if (userSucursalId) {
+        setSucursalSeleccionada(userSucursalId.toString());
+      }
+    }
+  }, [isAdmin, user]);
+
   const fetchData = () => {
     setLoading(true);
-    fetch("/api/reportes/resumen")
+    
+    // Construir URL con filtros
+    let url = "/api/reportes/resumen";
+    const params = new URLSearchParams();
+    
+    if (periodo) {
+      params.append('periodo', periodo);
+    }
+    
+    // Si es admin y seleccionó una sucursal específica, filtrar
+    // Si no es admin, siempre filtrar por su sucursal
+    if (!isAdmin) {
+      // Usuario normal: siempre filtrar por su sucursal
+      const userSucursalId = user?.sucursal_id;
+      if (userSucursalId) {
+        params.append('sucursal_id', userSucursalId.toString());
+      }
+    } else if (isAdmin && sucursalSeleccionada && sucursalSeleccionada !== 'todas') {
+      // Admin con sucursal específica seleccionada
+      params.append('sucursal_id', sucursalSeleccionada);
+    }
+    
+    if (params.toString()) {
+      url += `?${params.toString()}`;
+    }
+
+    console.log("Fetching data from:", url); // Debug
+
+    fetch(url)
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error("Error al cargar los reportes");
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || "Error al cargar los reportes");
         }
         return res.json();
       })
@@ -80,21 +183,64 @@ export default function ReportesPage() {
   };
 
   useEffect(() => {
+    if (status === "loading") return;
+    if (!session) return;
+    
     fetchData();
     
     // Actualizar cada 5 minutos
     const interval = setInterval(fetchData, 300000);
     return () => clearInterval(interval);
-  }, []);
+  }, [session, status, periodo, sucursalSeleccionada]); // Re-fetch cuando cambia el filtro
 
   const handleLimpiarReportes = async () => {
     try {
       setShowConfirm(false);
-      addToast("Reportes reiniciados correctamente", "success");
-      fetchData();
-    } catch (error) {
+      
+      // Construir URL con filtros para limpiar
+      let url = "/api/reportes/limpiar";
+      const params = new URLSearchParams();
+      
+      // Si es admin y seleccionó una sucursal específica, limpiar solo esa
+      // Si no es admin, limpiar su sucursal
+      if (!isAdmin) {
+        const userSucursalId = user?.sucursal_id;
+        if (userSucursalId) {
+          params.append('sucursal_id', userSucursalId.toString());
+        }
+      } else if (isAdmin && sucursalSeleccionada && sucursalSeleccionada !== 'todas') {
+        params.append('sucursal_id', sucursalSeleccionada);
+      }
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      console.log("Limpiando reportes en:", url); // Debug
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Error al limpiar reportes');
+      }
+
+      addToast(data.message || "Reportes reiniciados correctamente", "success");
+      
+      // Recargar datos después de limpiar
+      setTimeout(() => {
+        fetchData();
+      }, 500);
+      
+    } catch (error: any) {
       console.error("Error al limpiar:", error);
-      addToast("Error al limpiar los reportes", "error");
+      addToast(error.message || "Error al limpiar los reportes", "error");
     }
   };
 
@@ -104,10 +250,29 @@ export default function ReportesPage() {
       // Crear libro de Excel
       const wb = XLSX.utils.book_new();
       
+      // Determinar el nombre de la sucursal para el reporte
+      let nombreSucursal = "Todas las sucursales";
+      let sucursalId = null;
+      
+      if (!isAdmin) {
+        // Usuario normal
+        const userSucursalId = user?.sucursal_id;
+        if (userSucursalId) {
+          sucursalId = userSucursalId;
+          nombreSucursal = ID_SUCURSALES_MAP[userSucursalId] || `Sucursal ID: ${userSucursalId}`;
+        }
+      } else if (isAdmin && sucursalSeleccionada && sucursalSeleccionada !== 'todas') {
+        // Admin con sucursal específica
+        sucursalId = parseInt(sucursalSeleccionada);
+        const sucursal = sucursales.find(s => s.id === sucursalId);
+        nombreSucursal = sucursal?.nombre || ID_SUCURSALES_MAP[sucursalId] || `Sucursal ID: ${sucursalId}`;
+      }
+      
       // Hoja 1: Resumen General
       const resumenData = [
         ['RESUMEN GENERAL DE REPORTES'],
         ['Fecha de exportación', new Date().toLocaleString('es-MX')],
+        ['Sucursal', nombreSucursal],
         ['Período', periodo === '7dias' ? 'Últimos 7 días' : periodo === '30dias' ? 'Últimos 30 días' : 'Últimos 90 días'],
         [],
         ['MÉTRICAS PRINCIPALES', 'Valor'],
@@ -181,7 +346,8 @@ export default function ReportesPage() {
       
       // Generar archivo
       const fecha = new Date().toISOString().split('T')[0];
-      XLSX.writeFile(wb, `reportes_${fecha}.xlsx`);
+      const sufijoSucursal = sucursalId ? `_sucursal_${sucursalId}` : '';
+      XLSX.writeFile(wb, `reportes_${fecha}${sufijoSucursal}.xlsx`);
       
       addToast("Reporte exportado correctamente", "success");
     } catch (error) {
@@ -189,6 +355,22 @@ export default function ReportesPage() {
       addToast("Error al exportar el reporte", "error");
     }
   };
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen bg-white font-sans">
+        <Sidebar onCerrarSesion={() => {}} />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="h-16 w-16 animate-spin text-black mx-auto" />
+            <p className="mt-6 text-sm font-bold uppercase tracking-widest text-gray-400 animate-pulse">
+              Cargando sesión...
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -220,7 +402,7 @@ export default function ReportesPage() {
             <h2 className="text-lg font-black uppercase text-center text-gray-900 mb-2">Error de conexión</h2>
             <p className="text-xs text-gray-500 text-center mb-6 font-medium">{error}</p>
             <button 
-              onClick={() => window.location.reload()} 
+              onClick={fetchData} 
               className="w-full bg-black text-white py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-gray-800 transition-all flex items-center justify-center gap-2"
             >
               <RefreshCw size={16} />
@@ -264,6 +446,15 @@ export default function ReportesPage() {
     vendidos: Number(item.total_vendido)
   })) || [];
 
+  // Determinar qué sucursal mostrar en el indicador
+  const sucursalMostrada = !isAdmin 
+    ? ID_SUCURSALES_MAP[user?.sucursal_id] || `Sucursal ID: ${user?.sucursal_id}`
+    : sucursalSeleccionada !== 'todas'
+      ? (sucursales.find(s => s.id.toString() === sucursalSeleccionada)?.nombre || 
+         ID_SUCURSALES_MAP[parseInt(sucursalSeleccionada)] || 
+         `Sucursal ID: ${sucursalSeleccionada}`)
+      : "Todas las sucursales";
+
   return (
     <div className="flex min-h-screen bg-white font-sans">
       <Sidebar onCerrarSesion={() => {}} />
@@ -280,7 +471,9 @@ export default function ReportesPage() {
               </div>
               <h3 className="text-lg font-black uppercase text-gray-900 mb-2">¿Limpiar reportes?</h3>
               <p className="text-xs text-gray-500 mb-8 font-medium">
-                Esta acción reiniciará los contadores. Los datos históricos se mantienen.
+                {sucursalSeleccionada !== 'todas' 
+                  ? `Esta acción reiniciará los contadores de ${sucursalMostrada}.` 
+                  : "Esta acción reiniciará los contadores de todas las sucursales."}
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <button
@@ -315,9 +508,44 @@ export default function ReportesPage() {
                 day: 'numeric' 
               })}
             </p>
+            {/* Indicador de sucursal en el header para móvil */}
+            <div className="md:hidden mt-2">
+              <span className="text-xs font-bold bg-gray-100 px-3 py-1 rounded-full">
+                {sucursalMostrada}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-3">
+            {/* Selector de sucursal para admin - AHORA SINCRONIZADO */}
+            {isAdmin && (
+              <div className="relative">
+                <select 
+                  className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold uppercase tracking-wider text-gray-700 outline-none focus:border-black transition-colors appearance-none pr-10 min-w-[200px]"
+                  value={sucursalSeleccionada}
+                  onChange={(e) => {
+                    setSucursalSeleccionada(e.target.value);
+                    // Guardar en localStorage para persistencia
+                    if (e.target.value !== 'todas') {
+                      const sucursal = sucursales.find(s => s.id.toString() === e.target.value);
+                      if (sucursal) {
+                        localStorage.setItem("sucursalActiva", sucursal.nombre);
+                      }
+                    }
+                  }}
+                  disabled={cargandoSucursales}
+                >
+                  <option value="todas">Todas las sucursales</option>
+                  {sucursales.map((s) => (
+                    <option key={s.id} value={s.id.toString()}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+            )}
+
             {/* Selector de período */}
             <select 
               className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold uppercase tracking-wider text-gray-700 outline-none focus:border-black transition-colors"
@@ -365,6 +593,15 @@ export default function ReportesPage() {
             </button>
           </div>
         </header>
+
+        {/* Indicador de sucursal activa para desktop */}
+        {sucursalMostrada && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-xl border border-gray-200 hidden md:block">
+            <p className="text-xs font-bold uppercase tracking-wider text-gray-600">
+              Mostrando reportes de: <span className="text-black">{sucursalMostrada}</span>
+            </p>
+          </div>
+        )}
 
         {/* Tarjetas de KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
@@ -452,7 +689,7 @@ export default function ReportesPage() {
             </div>
           </div>
 
-          {/* Gráfica de métodos de pago - CON COLOR */}
+          {/* Gráfica de métodos de pago */}
           <div className="bg-white border border-gray-200 rounded-3xl shadow-sm p-4 md:p-6">
             <div className="flex items-center gap-2 mb-4">
               <PieChartIcon size={18} className="text-gray-400" />
@@ -499,7 +736,7 @@ export default function ReportesPage() {
 
         {/* Segunda fila de gráficas */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Top productos - CON COLOR */}
+          {/* Top productos */}
           <div className="bg-white border border-gray-200 rounded-3xl shadow-sm p-4 md:p-6">
             <div className="flex items-center gap-2 mb-4">
               <Package size={18} className="text-gray-400" />
@@ -602,7 +839,9 @@ export default function ReportesPage() {
             Última actualización: {new Date().toLocaleTimeString('es-MX')}
           </p>
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-200 mt-1">
-            Los datos se acumulan diariamente
+            {sucursalSeleccionada !== 'todas' 
+              ? `Datos filtrados por ${sucursalMostrada}` 
+              : 'Los datos se acumulan diariamente'}
           </p>
         </div>
       </main>
