@@ -130,7 +130,7 @@ export default function Home() {
       const json = await res.json();
       console.log("📦 Respuesta completa:", json);
 
-      const caja = json.data?.[0];
+      const caja = json.caja;
       console.log("💰 Caja encontrada:", caja);
 
       if (caja) {
@@ -283,9 +283,10 @@ export default function Home() {
       const res = await fetch("/api/dashboard/caja", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          monto_inicial: Number(montoInicial)
-        })
+       body: JSON.stringify({
+  monto_inicial: Number(montoInicial),
+  sucursal_id: (session?.user as SessionUser)?.sucursal_id
+})
       });
 
       const json = await res.json();
