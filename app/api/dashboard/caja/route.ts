@@ -19,6 +19,7 @@ export async function GET(req: Request) {
 
     const user = session.user as any;
     const userRole = user.role?.toLowerCase();
+    const sucursalId = user.sucursal_id;
 
     /* =========================
        HISTORIAL
@@ -47,8 +48,6 @@ export async function GET(req: Request) {
     /* =========================
        CAJA ABIERTA ACTUAL
     ========================= */
-    const sucursalId = user.sucursal_id;
-
     const [rows]: any = await db.query(
       `
       SELECT c.*, u.nombre as usuario_nombre
@@ -87,13 +86,14 @@ export async function POST(req: Request) {
     const { monto_inicial } = await req.json();
     const user = session.user as any;
 
-    if (!monto_inicial || Number(monto_inicial) <= 0) {
+    if (!monto_inicial || Number(monto_inicial) < 0) {
       return NextResponse.json(
         { error: "Monto inicial inválido" },
         { status: 400 }
       );
     }
 
+    // Verificar si ya existe caja abierta
     const [existente]: any = await db.query(
       `
       SELECT id FROM cajas
@@ -111,18 +111,21 @@ export async function POST(req: Request) {
       );
     }
 
+    const montoInicial = Number(monto_inicial);
+
     const [result]: any = await db.query(
       `
       INSERT INTO cajas
       (sucursal_id, usuario_id, fecha, monto_inicial, monto_final,
-       total_ventas, total_apartados, estado, observaciones)
-      VALUES (?, ?, CURDATE(), ?, ?, 0, 0, 'ABIERTA', ?)
+       total_ventas, total_transacciones, total_apartados,
+       estado, observaciones)
+      VALUES (?, ?, CURDATE(), ?, ?, 0, 0, 0, 'ABIERTA', ?)
       `,
       [
         user.sucursal_id,
         user.id,
-        Number(monto_inicial),
-        Number(monto_inicial),
+        montoInicial,
+        montoInicial,
         "Apertura de caja"
       ]
     );
@@ -134,7 +137,7 @@ export async function POST(req: Request) {
       (caja_id, tipo, monto, descripcion, usuario_id)
       VALUES (?, 'APERTURA', ?, ?, ?)
       `,
-      [result.insertId, Number(monto_inicial), "Apertura de caja", user.id]
+      [result.insertId, montoInicial, "Apertura de caja", user.id]
     );
 
     return NextResponse.json({ success: true });
@@ -149,7 +152,7 @@ export async function POST(req: Request) {
 }
 
 /* =========================
-   PATCH - Actualizar / Ajustar / Cerrar
+   PATCH - Ajustar o Cerrar Caja
 ========================= */
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
@@ -177,7 +180,7 @@ export async function PATCH(req: Request) {
     const caja = rows[0];
 
     /* =========================
-       1️⃣ ACTUALIZAR MONTO INICIAL
+       1️⃣ AJUSTAR MONTO INICIAL
     ========================= */
     if (monto_inicial !== undefined && monto_final === undefined) {
 
@@ -203,7 +206,7 @@ export async function PATCH(req: Request) {
         [
           id,
           diferencia,
-          `Ajuste de monto inicial`,
+          "Ajuste de monto inicial",
           user.id
         ]
       );
@@ -216,7 +219,9 @@ export async function PATCH(req: Request) {
     ========================= */
     if (monto_final !== undefined) {
 
-      const nuevoMontoFinal = Number(monto_final);
+      const montoSistema = Number(caja.monto_final);
+      const montoDeclarado = Number(monto_final);
+      const diferencia = montoDeclarado - montoSistema;
 
       await db.query(
         `
@@ -226,7 +231,7 @@ export async function PATCH(req: Request) {
             fecha_cierre = NOW()
         WHERE id = ?
         `,
-        [nuevoMontoFinal, id]
+        [montoDeclarado, id]
       );
 
       await db.query(
@@ -237,8 +242,8 @@ export async function PATCH(req: Request) {
         `,
         [
           id,
-          nuevoMontoFinal,
-          "Cierre de caja",
+          diferencia,
+          `Cierre de caja. Diferencia: ${diferencia}`,
           user.id
         ]
       );
