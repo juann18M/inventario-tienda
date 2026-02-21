@@ -58,7 +58,7 @@ export async function GET(req: Request) {
       FROM cajas c
       JOIN usuarios u ON c.usuario_id = u.id
       WHERE c.sucursal_id = ?
-      AND c.estado = 'ABIERTA'
+      AND c.estado='ABIERTA'
       ORDER BY c.id DESC
       LIMIT 1
       `,
@@ -99,11 +99,9 @@ export async function POST(req: Request) {
 
     const user = session.user as any;
 
-    /* ===== verificar caja abierta ===== */
     const [existente]: any = await db.query(
       `SELECT id FROM cajas
-       WHERE sucursal_id = ?
-       AND estado='ABIERTA'
+       WHERE sucursal_id=? AND estado='ABIERTA'
        LIMIT 1`,
       [user.sucursal_id]
     );
@@ -115,15 +113,14 @@ export async function POST(req: Request) {
       );
     }
 
-    /* ===== crear caja ===== */
     const [result]: any = await db.query(
       `
       INSERT INTO cajas
-      (sucursal_id, usuario_id, fecha,
-       monto_inicial, monto_final,
-       total_ventas, total_transacciones,
-       total_apartados, estado, observaciones)
-      VALUES (?, ?, CURDATE(), ?, ?, 0, 0, 0, 'ABIERTA', ?)
+      (sucursal_id,usuario_id,fecha,
+       monto_inicial,monto_final,
+       total_ventas,total_transacciones,
+       total_apartados,estado,observaciones)
+      VALUES (?, ?, CURDATE(), ?, ?, 0,0,0,'ABIERTA',?)
       `,
       [
         user.sucursal_id,
@@ -134,11 +131,10 @@ export async function POST(req: Request) {
       ]
     );
 
-    /* ===== movimiento ===== */
     await db.query(
       `
       INSERT INTO movimientos_caja
-      (caja_id, tipo, monto, descripcion, usuario_id)
+      (caja_id,tipo,monto,descripcion,usuario_id)
       VALUES (?, 'APERTURA', ?, ?, ?)
       `,
       [result.insertId, montoInicial, "Apertura de caja", user.id]
@@ -156,7 +152,7 @@ export async function POST(req: Request) {
 }
 
 /* =====================================================
-   PATCH — Ajustar o Cerrar Caja
+   PATCH — Ajustar o Cerrar Caja (FIX DEFINITIVO)
 ===================================================== */
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
@@ -180,10 +176,7 @@ export async function PATCH(req: Request) {
         : undefined;
 
     if (!Number.isFinite(id)) {
-      return NextResponse.json(
-        { error: "ID inválido" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "ID inválido" }, { status: 400 });
     }
 
     const user = session.user as any;
@@ -202,15 +195,13 @@ export async function PATCH(req: Request) {
 
     const caja = rows[0];
 
-    /* ================= AJUSTE INICIAL ================= */
-    if (montoInicial !== undefined && montoFinal === undefined) {
-      if (!Number.isFinite(montoInicial)) {
-        return NextResponse.json(
-          { error: "Monto inválido" },
-          { status: 400 }
-        );
-      }
-
+    /* =====================================================
+       ✅ AJUSTE (aunque frontend mande ambos valores)
+    ===================================================== */
+    if (
+      montoInicial !== undefined &&
+      Number(montoInicial) !== Number(caja.monto_inicial)
+    ) {
       const diferencia =
         montoInicial - Number(caja.monto_inicial);
 
@@ -236,18 +227,13 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ success: true });
     }
 
-    /* ================= CIERRE CAJA ================= */
+    /* =====================================================
+       ✅ CIERRE
+    ===================================================== */
     if (montoFinal !== undefined) {
       if (caja.estado === "CERRADA") {
         return NextResponse.json(
           { error: "La caja ya está cerrada" },
-          { status: 400 }
-        );
-      }
-
-      if (!Number.isFinite(montoFinal)) {
-        return NextResponse.json(
-          { error: "Monto final inválido" },
           { status: 400 }
         );
       }
@@ -284,7 +270,7 @@ export async function PATCH(req: Request) {
     }
 
     return NextResponse.json(
-      { error: "Operación no válida" },
+      { error: "Sin cambios detectados" },
       { status: 400 }
     );
   } catch (error) {
