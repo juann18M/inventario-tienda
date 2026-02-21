@@ -88,7 +88,7 @@ export async function GET(req: Request) {
   FROM cajas c
   JOIN usuarios u ON c.usuario_id = u.id
   WHERE c.sucursal_id = ?
-  AND c.fecha = CURDATE()
+  AND c.estado = 'ABIERTA'
   ORDER BY c.id DESC
   LIMIT 1
   `,
@@ -150,16 +150,15 @@ export async function POST(req: Request) {
     }
 
     // Verificar si ya existe caja ABIERTA hoy (monto_final = monto_inicial)
-    const [existente]: any = await db.query(
-      `
-      SELECT id FROM cajas
-      WHERE sucursal_id = ?
-      AND monto_final = monto_inicial
-      AND fecha = CURDATE()
-      LIMIT 1
-      `,
-      [sucursalId]
-    );
+   const [existente]: any = await db.query(
+  `
+  SELECT id FROM cajas
+  WHERE sucursal_id = ?
+  AND estado = 'ABIERTA'
+  LIMIT 1
+  `,
+  [sucursalId]
+);
 
     if (existente.length) {
       // Si existe, devolvemos sus datos
@@ -241,15 +240,16 @@ export async function PATCH(req: Request) {
     // Si solo actualiza monto inicial
     if (monto_inicial !== undefined && monto_final === undefined) {
       await db.query(
-        `
-        UPDATE cajas
-        SET monto_inicial = ?,
-            monto_final = ?,
-            observaciones = CONCAT(observaciones, ' | Actualizado: $', ?)
-        WHERE id = ?
-        `,
-        [Number(monto_inicial), Number(monto_inicial), Number(monto_inicial), id]
-      );
+  `
+  UPDATE cajas
+  SET monto_final = ?,
+      estado = 'CERRADA',
+      fecha_cierre = NOW(),
+      observaciones = CONCAT(IFNULL(observaciones,''), ' | Cierre: $', ?)
+  WHERE id = ?
+  `,
+  [Number(monto_final), Number(monto_final), id]
+);
 
       return NextResponse.json({
         success: true,
@@ -259,15 +259,16 @@ export async function PATCH(req: Request) {
 
     // Si está cerrando caja
     if (monto_final !== undefined) {
-      await db.query(
-        `
-        UPDATE cajas
-        SET monto_final = ?,
-            observaciones = CONCAT(observaciones, ' | Cierre: $', ?, ' ', NOW())
-        WHERE id = ?
-        `,
-        [Number(monto_final), Number(monto_final), id]
-      );
+     await db.query(
+  `
+  UPDATE cajas
+  SET monto_final = ?,
+      estado = 'CERRADA',
+      observaciones = CONCAT(observaciones, ' | Cierre: $', ?, ' ', NOW())
+  WHERE id = ?
+  `,
+  [Number(monto_final), Number(monto_final), id]
+);
 
       return NextResponse.json({
         success: true,

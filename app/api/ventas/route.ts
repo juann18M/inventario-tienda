@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   SELECT id, monto_inicial, monto_final, total_ventas 
   FROM cajas
   WHERE sucursal_id = ?
-  AND fecha = CURDATE()
+  AND estado = 'ABIERTA'
   ORDER BY id DESC
   LIMIT 1
   `,
