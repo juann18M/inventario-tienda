@@ -61,7 +61,8 @@ export async function POST(req: NextRequest) {
 
     const [cajaActiva]: any = await db.query(
       `
-      SELECT id FROM cajas
+      SELECT id, monto_inicial, monto_final, total_ventas 
+      FROM cajas
       WHERE sucursal_id = ?
       AND estado = 'ABIERTA'
       LIMIT 1
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     if (!cajaActiva.length) {
       return NextResponse.json(
-        { error: "No hay una caja abierta en esta sucursal." },
+        { error: "No hay una caja abierta en esta sucursal. Debes abrir caja antes de vender." },
         { status: 400 }
       );
     }
@@ -134,24 +135,26 @@ export async function POST(req: NextRequest) {
     const totalVenta = Number(ventaRows[0].total);
 
     // ============================
-    // SUMAR A CAJA
+    // SUMAR A CAJA (actualizar montos)
     // ============================
 
     await db.query(
       `
       UPDATE cajas
-      SET total_ventas = total_ventas + ?
+      SET total_ventas = total_ventas + ?,
+          monto_final = monto_inicial + (total_ventas + ?)
       WHERE id = ?
       `,
-      [totalVenta, cajaId]
+      [totalVenta, totalVenta, cajaId]
     );
 
-    console.log(`✅ Venta #${ventaId} registrada y sumada a caja ${cajaId}`);
+    console.log(`✅ Venta #${ventaId} registrada. Total: $${totalVenta} sumado a caja ${cajaId}`);
 
     return NextResponse.json({
       success: true,
       ventaId: ventaId,
       message: "Venta registrada correctamente",
+      total: totalVenta
     });
 
   } catch (error: any) {

@@ -27,6 +27,7 @@ type SessionUser = {
   sucursal_nombre?: string | null; // 👈 campo correcto para el nombre
   sucursal_id?: number;             // 👈 nuevo campo para el ID
   id?: number;
+  
 };
 
 interface Notificacion {
