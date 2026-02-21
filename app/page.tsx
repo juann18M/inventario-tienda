@@ -348,37 +348,47 @@ export default function Home() {
       alert("Error de conexión al abrir caja");
     }
   };
-
-  const handlerActualizar = async () => {
-    try {
-      const caja = await obtenerCajaActual();
-      if (!caja) return;
-
-      const res = await fetch("/api/dashboard/caja", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: caja.id,
-          monto_inicial: tabCaja === "inicial" ? Number(montoInicial) : undefined,
-          monto_final: tabCaja === "final" ? Number(montoFinal) : undefined
-        })
-      });
-
-      if (res.ok) {
-        setModalActualizarCaja(false);
-        await sincronizarCaja(sucursalActiva!);
-        
-        addNotificacion(
-          "Caja Actualizada",
-          `Monto ${tabCaja} actualizado a $${(tabCaja === "inicial" ? Number(montoInicial) : Number(montoFinal)).toLocaleString('es-MX')}`,
-          'caja',
-          '/'
-        );
-      }
-    } catch (error) {
-      console.error("Error al actualizar:", error);
+const handlerActualizar = async () => {
+  try {
+    if (!cajaId) {
+      alert("No hay caja activa");
+      return;
     }
-  };
+
+    const body: any = { id: cajaId };
+
+    if (tabCaja === "inicial") {
+      body.monto_inicial = Number(montoInicial);
+    }
+
+    if (tabCaja === "final") {
+      body.monto_final = Number(montoFinal);
+    }
+
+    const res = await fetch("/api/dashboard/caja", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.error || "Error al actualizar caja");
+      return;
+    }
+
+    // ✅ Cerrar modal inmediatamente
+    setModalActualizarCaja(false);
+
+    // ✅ Sincronizar datos reales
+    await sincronizarCaja(sucursalActiva!);
+
+  } catch (error) {
+    console.error("Error al actualizar:", error);
+    alert("Error al actualizar caja");
+  }
+};
 
   const handleCambioSucursal = async (nuevaSucursal: string) => {
     setSucursalActiva(nuevaSucursal);
