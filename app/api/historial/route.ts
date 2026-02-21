@@ -3,195 +3,185 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
+
     if (!session?.user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+      return NextResponse.json(
+        { error: "No autorizado" },
+        { status: 401 }
+      );
     }
 
     const { searchParams } = new URL(request.url);
     const user: any = session.user;
-    const rol = user.role.toLowerCase();
+    const rol = String(user.role || "").toLowerCase().trim();
 
-    // -------------------------
-    // Parámetros
-    // -------------------------
+    // =============================
+    // ✅ PAGINACIÓN
+    // =============================
+    const pagina = Math.max(1, Number(searchParams.get("pagina")) || 1);
+    const limite = Math.max(1, Number(searchParams.get("limite")) || 20);
+    const offset = (pagina - 1) * limite;
+
+    // =============================
+    // ✅ FILTROS
+    // =============================
     const fechaInicio = searchParams.get("fechaInicio");
     const fechaFin = searchParams.get("fechaFin");
     const usuarioId = searchParams.get("usuarioId");
-    const sucursalId = searchParams.get("sucursalId");
+    let sucursalIdParam = searchParams.get("sucursalId");
     const metodoPago = searchParams.get("metodoPago");
     const cliente = searchParams.get("cliente");
-    const pagina = Number(searchParams.get("pagina") || 1);
-    const limite = Number(searchParams.get("limite") || 20);
-    const offset = (pagina - 1) * limite;
+    const verTodas = searchParams.get("verTodas") === "true";
 
-    // -------------------------
-    // WHERE (BASE)
-    // -------------------------
+    // Limpiar valores inválidos
+    if (
+      sucursalIdParam === "undefined" ||
+      sucursalIdParam === "null" ||
+      sucursalIdParam === ""
+    ) {
+      sucursalIdParam = null;
+    }
+
     const whereConditions: string[] = [];
     const whereParams: any[] = [];
 
-    // 🔒 Solo ventas visibles (no eliminadas lógicamente)
+    // Solo ventas visibles
     whereConditions.push("v.visible_dashboard = 1");
 
-    // -------------------------
-    // Permisos por rol
-    // -------------------------
+    // =============================
+    // ✅ LÓGICA DE SUCURSAL Y ROL (CORREGIDA)
+    // =============================
     if (rol === "admin") {
-      if (usuarioId) {
-        const id = Number(usuarioId);
-        if (!isNaN(id) && id > 0) {
-          whereConditions.push("v.usuario_id = ?");
-          whereParams.push(id);
+      if (!verTodas) {
+        // Usar sucursal del query o fallback a la del usuario
+        const sucursalActiva = Number(
+          sucursalIdParam || user.sucursal_id
+        );
+
+        if (!isNaN(sucursalActiva) && sucursalActiva > 0) {
+          whereConditions.push("v.sucursal_id = ?");
+          whereParams.push(sucursalActiva);
         }
       }
 
-      if (sucursalId) {
-        const id = Number(sucursalId);
-        if (!isNaN(id) && id > 0) {
-          whereConditions.push("v.sucursal_id = ?");
-          whereParams.push(id);
+      // Filtro por usuario específico
+      if (
+        usuarioId &&
+        usuarioId !== "undefined" &&
+        usuarioId !== "null" &&
+        usuarioId !== ""
+      ) {
+        const idU = Number(usuarioId);
+        if (!isNaN(idU) && idU > 0) {
+          whereConditions.push("v.usuario_id = ?");
+          whereParams.push(idU);
         }
       }
     } else {
-      const userId = Number(user.id);
-      const userSucursalId = Number(user.sucursal_id);
-
-      if (isNaN(userId) || userId <= 0) {
-        return NextResponse.json({ error: "ID de usuario inválido" }, { status: 400 });
-      }
-
-      if (isNaN(userSucursalId) || userSucursalId <= 0) {
-        return NextResponse.json({ error: "ID de sucursal inválido" }, { status: 400 });
-      }
-
+      // Usuarios normales: forzar su propia sucursal y su propio usuario
       whereConditions.push("v.usuario_id = ?");
-      whereParams.push(userId);
+      whereParams.push(Number(user.id) || 0);
 
       whereConditions.push("v.sucursal_id = ?");
-      whereParams.push(userSucursalId);
+      whereParams.push(Number(user.sucursal_id) || 0);
     }
 
-    // -------------------------
-    // Filtros opcionales
-    // -------------------------
-    if (fechaInicio) {
+    // =============================
+    // ✅ FILTROS OPCIONALES
+    // =============================
+    if (fechaInicio && fechaInicio !== "undefined" && fechaInicio !== "null") {
       whereConditions.push("DATE(v.fecha) >= ?");
       whereParams.push(fechaInicio);
     }
 
-    if (fechaFin) {
+    if (fechaFin && fechaFin !== "undefined" && fechaFin !== "null") {
       whereConditions.push("DATE(v.fecha) <= ?");
       whereParams.push(fechaFin);
     }
 
-    if (metodoPago) {
+    if (
+      metodoPago &&
+      metodoPago !== "undefined" &&
+      metodoPago !== "null" &&
+      metodoPago.trim() !== ""
+    ) {
       whereConditions.push("v.metodo_pago = ?");
       whereParams.push(metodoPago);
-    } else {
-      // ✅ INCLUIR VENTAS DE APARTADOS (método de pago = 'APARTADO')
-      // No filtramos por método de pago, permitimos todos
     }
 
-    if (cliente && cliente.trim() !== "") {
+    if (
+      cliente &&
+      cliente !== "undefined" &&
+      cliente !== "null" &&
+      cliente.trim() !== ""
+    ) {
       whereConditions.push("(v.cliente LIKE ? OR a.cliente LIKE ?)");
-      whereParams.push(`%${cliente}%`);
-      whereParams.push(`%${cliente}%`);
+      whereParams.push(`%${cliente}%`, `%${cliente}%`);
     }
 
-    // -------------------------
-    // QUERY PRINCIPAL - INCLUYENDO APARTADOS
-    // -------------------------
+    // =============================
+    // ✅ QUERY PRINCIPAL
+    // =============================
     let query = `
       SELECT 
         v.id,
         v.fecha,
         v.total,
         v.metodo_pago,
-        CASE 
+        v.sucursal_id,
+        CASE
           WHEN v.metodo_pago = 'APARTADO' THEN COALESCE(a.cliente, 'Cliente de apartado')
-          ELSE v.cliente
+          ELSE COALESCE(v.cliente, 'Sin cliente')
         END AS cliente,
-        CASE 
-          WHEN v.metodo_pago = 'APARTADO' THEN CONCAT('Apartado #', a.id, ' - Liquidado')
-          ELSE v.observaciones
-        END AS observaciones,
         u.nombre AS usuario_nombre,
         u.rol AS usuario_rol,
         s.nombre AS sucursal_nombre,
-        COUNT(dv.id) AS cantidad_productos,
-        CASE 
-          WHEN v.metodo_pago = 'APARTADO' THEN true 
-          ELSE false 
-        END AS es_apartado,
+        COUNT(DISTINCT dv.id) AS cantidad_productos,
+        COALESCE(SUM(dv.cantidad), 0) AS unidades_totales,
+        (v.metodo_pago = 'APARTADO') AS es_apartado,
         a.id AS apartado_id,
-        a.cliente AS cliente_apartado,
-        a.fecha AS fecha_apartado
+        a.cliente AS cliente_apartado
       FROM ventas v
-      LEFT JOIN usuarios u ON v.usuario_id = u.id
-      LEFT JOIN sucursales s ON v.sucursal_id = s.id
+      INNER JOIN usuarios u ON v.usuario_id = u.id
+      INNER JOIN sucursales s ON v.sucursal_id = s.id
       LEFT JOIN detalle_venta dv ON v.id = dv.venta_id
       LEFT JOIN apartados a ON v.id = a.venta_id
     `;
 
-    if (whereConditions.length > 0) {
+    if (whereConditions.length) {
       query += " WHERE " + whereConditions.join(" AND ");
     }
 
-    // ⚠️ SOLO ventas con productos
     query += `
-      GROUP BY v.id, a.id, a.cliente, a.fecha
-      HAVING COUNT(dv.id) > 0
+      GROUP BY v.id, a.id
       ORDER BY v.fecha DESC
       LIMIT ${limite} OFFSET ${offset}
     `;
 
-    const [ventas]: any = await db.execute(query, whereParams);
+    const [ventas] = await db.query(query, whereParams);
 
-    // Formatear las ventas para mostrar información clara
-    const ventasFormateadas = ventas.map((venta: any) => ({
-      ...venta,
-      // Si es apartado, mostrar el cliente del apartado
-      cliente_mostrar: venta.metodo_pago === 'APARTADO' 
-        ? venta.cliente_apartado || venta.cliente
-        : venta.cliente,
-      // Formatear fecha
-      fecha_formateada: new Date(venta.fecha).toLocaleDateString('es-MX', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    }));
-
-    // -------------------------
-    // QUERY COUNT (CORRECTO)
-    // -------------------------
-    let countQuery = `
-      SELECT COUNT(*) AS total
-      FROM (
-        SELECT v.id
-        FROM ventas v
-        LEFT JOIN detalle_venta dv ON v.id = dv.venta_id
-        LEFT JOIN apartados a ON v.id = a.venta_id
-        ${whereConditions.length ? "WHERE " + whereConditions.join(" AND ") : ""}
-        GROUP BY v.id
-        HAVING COUNT(dv.id) > 0
-      ) t
+    // =============================
+    // ✅ CONTADOR PARA PAGINACIÓN
+    // =============================
+    const countQuery = `
+      SELECT COUNT(DISTINCT v.id) as total
+      FROM ventas v
+      LEFT JOIN apartados a ON v.id = a.venta_id
+      ${whereConditions.length ? "WHERE " + whereConditions.join(" AND ") : ""}
     `;
 
-    const [countResult]: any = await db.execute(countQuery, whereParams);
-    const total = countResult[0]?.total || 0;
+    const [countResult] = await db.query(countQuery, whereParams);
+    const total = (countResult as any[])[0]?.total || 0;
 
-    // -------------------------
-    // RESPONSE
-    // -------------------------
     return NextResponse.json({
       success: true,
-      ventas: ventasFormateadas,
+      ventas: ventas || [],
       paginacion: {
         pagina,
         limite,
@@ -201,14 +191,9 @@ export async function GET(request: Request) {
     });
 
   } catch (error: any) {
-    console.error("❌ Error en API historial:", error);
-
+    console.error("❌ Error historial:", error);
     return NextResponse.json(
-      {
-        success: false,
-        error: "Error al obtener historial",
-        message: error.message,
-      },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }

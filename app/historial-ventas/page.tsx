@@ -7,23 +7,16 @@ import TablaVentas from "./components/TablaVentas";
 import FiltrosVentas from "./components/FiltrosVentas";
 import DetalleVentaModal from "./components/DetalleVentaModal";
 import { 
-  FileText, 
   Download,
   Filter,
   RefreshCw,
   DollarSign,
-  ShoppingCart,
-  Users,
   Store,
   TrendingUp,
   Package,
-  Calendar,
-  ChevronDown,
   X,
   Receipt,
   BarChart3,
-  CreditCard,
-  ArrowLeft,
   Globe
 } from "lucide-react";
 
@@ -68,6 +61,13 @@ const SUCURSALES_MAP: Record<string, number> = {
   "Guadalupe Victoria": 4,
 };
 
+const ID_SUCURSALES_MAP: Record<number, string> = {
+  1: "Centro Isidro Huarte 1",
+  2: "Centro Isidro Huarte 2",
+  3: "Santiago Tapia",
+  4: "Guadalupe Victoria",
+};
+
 export default function HistorialVentasPage() {
   const { data: session, status } = useSession();
   const [ventas, setVentas] = useState<Venta[]>([]);
@@ -83,21 +83,20 @@ export default function HistorialVentasPage() {
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [mostrarEstadisticas, setMostrarEstadisticas] = useState(true);
   
-  // Estado para la sucursal activa del admin (filtro por defecto)
-  const [sucursalActiva, setSucursalActiva] = useState<string | null>(null);
+  // ✅ ÚNICA FUENTE DE VERDAD: sucursalIdActiva
+  const [sucursalIdActiva, setSucursalIdActiva] = useState<number | null>(null);
   // Estado para modo "Todas las sucursales" (solo admin)
   const [verTodasSucursales, setVerTodasSucursales] = useState(false);
 
-  // Filtros - SIN incluir sucursalId por defecto
-  // Alrededor de la línea 83
-const [filtros, setFiltros] = useState({
-  fechaInicio: "",
-  fechaFin: "",
-  usuarioId: "",
-  metodoPago: "",
-  cliente: "",
-  sucursalId: "" // 👈 AGREGA ESTA LÍNEA AQUÍ
-});
+  // Filtros
+  const [filtros, setFiltros] = useState({
+    fechaInicio: "",
+    fechaFin: "",
+    usuarioId: "",
+    metodoPago: "",
+    cliente: "",
+    sucursalId: ""
+  });
 
   const [filtrosActivos, setFiltrosActivos] = useState(0);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -112,7 +111,17 @@ const [filtros, setFiltros] = useState({
       // Función para actualizar la sucursal activa
       const actualizarSucursalActiva = () => {
         const sucursalGuardada = localStorage.getItem("sucursalActiva");
-        setSucursalActiva(sucursalGuardada);
+        console.log("📦 Sucursal guardada en localStorage:", sucursalGuardada);
+        
+        // ✅ Actualizar SOLO el ID, no mantener estado duplicado
+        if (sucursalGuardada && SUCURSALES_MAP[sucursalGuardada]) {
+          const id = SUCURSALES_MAP[sucursalGuardada];
+          setSucursalIdActiva(id);
+          console.log("✅ ID de sucursal activa:", id);
+        } else {
+          setSucursalIdActiva(null);
+        }
+        
         // Al cambiar de sucursal, desactivar modo "Todas las sucursales"
         setVerTodasSucursales(false);
       };
@@ -121,7 +130,11 @@ const [filtros, setFiltros] = useState({
       actualizarSucursalActiva();
 
       // Escuchar cambios en localStorage
-      window.addEventListener('storage', actualizarSucursalActiva);
+      window.addEventListener('storage', (e) => {
+        if (e.key === 'sucursalActiva') {
+          actualizarSucursalActiva();
+        }
+      });
       
       // Evento personalizado para cuando se cambia desde el sidebar
       const handleSucursalChange = () => actualizarSucursalActiva();
@@ -164,68 +177,99 @@ const [filtros, setFiltros] = useState({
     }
   }, [status, session]);
 
+  // Contar filtros activos
+  useEffect(() => {
+    let count = 0;
+    Object.entries(filtros).forEach(([key, value]) => {
+      if (value && value.trim() !== "") count++;
+    });
+    setFiltrosActivos(count);
+  }, [filtros]);
+
+  // ✅ FUNCIÓN CARGAR VENTAS OPTIMIZADA - SIN DOBLE FUENTE DE VERDAD
   const cargarVentas = useCallback(async (pagina = 1) => {
     if (status !== "authenticated") return;
     
     setIsLoading(true);
+    setVentas([]);
+    
     try {
       const params = new URLSearchParams({
         pagina: pagina.toString(),
         limite: paginacion.limite.toString(),
-        ...filtros
+        _t: Date.now().toString()
       });
 
-      // Agregar filtro de sucursal según el contexto
+      // Agregar filtros
+      Object.entries(filtros).forEach(([key, value]) => {
+        if (value && value.trim() !== "") {
+          params.append(key, value);
+        }
+      });
+
       const user = session?.user as any;
       const isAdmin = user?.role?.toLowerCase() === "admin";
       
       if (isAdmin) {
-        // Admin: Si está en modo "Todas las sucursales", NO enviar filtro de sucursal
-        // Si no, enviar la sucursal activa
-        if (!verTodasSucursales && sucursalActiva) {
-          const sucursalId = SUCURSALES_MAP[sucursalActiva];
-          if (sucursalId) {
-            params.append('sucursalId', sucursalId.toString());
-          }
+        // Pasar explícitamente el modo "todas las sucursales"
+        params.append('verTodas', verTodasSucursales ? 'true' : 'false');
+        
+        // ✅ SOLO USAR sucursalIdActiva, sin fallback a sucursalActiva
+        if (!verTodasSucursales && sucursalIdActiva) {
+          params.append('sucursalId', sucursalIdActiva.toString());
+          console.log("🔍 Enviando filtro de sucursal:", sucursalIdActiva);
         }
       } else {
-        // No-admin: Siempre filtrar por su sucursal
         if (user?.sucursal_id) {
           params.append('sucursalId', user.sucursal_id.toString());
         }
       }
 
-      // Eliminar filtros vacíos
-      Object.entries(filtros).forEach(([key, value]) => {
-        if (!value) params.delete(key);
-      });
+      console.log("📡 Fetching con params:", params.toString());
 
       const res = await fetch(`/api/historial?${params.toString()}`, {
-        credentials: "include"
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
+        cache: 'no-store'
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
+          console.log("✅ Ventas cargadas:", data.ventas.length);
           setVentas(data.ventas);
           setPaginacion(data.paginacion);
         }
       } else {
-        console.error("Error en respuesta:", res.status);
+        console.error("❌ Error en respuesta:", res.status);
       }
     } catch (error) {
       console.error("Error cargando ventas:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [status, filtros, paginacion.limite, sucursalActiva, verTodasSucursales, session]);
+  }, [status, filtros, paginacion.limite, sucursalIdActiva, verTodasSucursales, session]); // ✅ Sin sucursalActiva
 
-  // Cargar ventas al iniciar y cuando cambian los filtros o la sucursal activa
+  // ✅ useEffect PROFESIONAL - Espera a tener los datos necesarios
   useEffect(() => {
-    if (status === "authenticated") {
-      cargarVentas();
+    if (status !== "authenticated") return;
+
+    const user = session?.user as any;
+    const isAdmin = user?.role?.toLowerCase() === "admin";
+
+    // 🔥 Si es admin y NO está en verTodas, esperar hasta que sucursalIdActiva esté lista
+    if (isAdmin && !verTodasSucursales && !sucursalIdActiva) {
+      console.log("⏳ Esperando sucursal activa...");
+      return;
     }
-  }, [status, cargarVentas, sucursalActiva, verTodasSucursales]);
+
+    console.log("🔄 Cargando ventas correctamente...");
+    cargarVentas();
+  }, [status, sucursalIdActiva, verTodasSucursales, session]); // ✅ SIN cargarVentas en dependencias
 
   const handleFiltroChange = (nuevosFiltros: Partial<typeof filtros>) => {
     setFiltros(prev => ({ ...prev, ...nuevosFiltros }));
@@ -234,7 +278,6 @@ const [filtros, setFiltros] = useState({
 
   const toggleVerTodasSucursales = () => {
     setVerTodasSucursales(!verTodasSucursales);
-    // No resetear otros filtros, solo cambiar el ámbito de búsqueda
     cargarVentas(1);
   };
 
@@ -247,27 +290,29 @@ const [filtros, setFiltros] = useState({
       cliente: "",
       sucursalId: ""
     });
-    // No cambiar el estado de verTodasSucursales ni sucursalActiva
     cargarVentas(1);
   };
 
   const handleExportar = async () => {
     try {
       const params = new URLSearchParams({
-        ...filtros,
         exportar: "true"
       });
 
-      // Agregar filtro de sucursal igual que en cargarVentas
+      // Agregar filtros solo si tienen valor
+      Object.entries(filtros).forEach(([key, value]) => {
+        if (value && value.trim() !== "") {
+          params.append(key, value);
+        }
+      });
+
+      // Agregar filtro de sucursal
       const user = session?.user as any;
       const isAdmin = user?.role?.toLowerCase() === "admin";
       
       if (isAdmin) {
-        if (!verTodasSucursales && sucursalActiva) {
-          const sucursalId = SUCURSALES_MAP[sucursalActiva];
-          if (sucursalId) {
-            params.append('sucursalId', sucursalId.toString());
-          }
+        if (!verTodasSucursales && sucursalIdActiva) {
+          params.append('sucursalId', sucursalIdActiva.toString());
         }
       } else {
         if (user?.sucursal_id) {
@@ -318,21 +363,17 @@ const [filtros, setFiltros] = useState({
   const getSucursalActualNombre = () => {
     if (isAdmin) {
       if (verTodasSucursales) return "Todas las sucursales";
-      if (sucursalActiva) return sucursalActiva;
-      return "Multi-sucursal";
+      if (sucursalIdActiva) return ID_SUCURSALES_MAP[sucursalIdActiva] || `Sucursal ${sucursalIdActiva}`;
+      return "Selecciona una sucursal";
     }
     return user?.sucursal || "No asignada";
   };
 
   // Calcular estadísticas
-  const totalVentas = ventas.reduce(
-    (sum, venta) => sum + Number(venta.total),
-    0
-  );
-
-  const promedioVenta = ventas.length > 0 ? totalVentas / ventas.length : 0;
+  const totalVentas = isLoading ? 0 : ventas.reduce((sum, venta) => sum + Number(venta.total), 0);
+  const promedioVenta = (!isLoading && ventas.length > 0) ? totalVentas / ventas.length : 0;
   const sucursalActual = getSucursalActualNombre();
-  const totalProductos = ventas.reduce((sum, venta) => sum + venta.cantidad_productos, 0);
+  const totalProductos = isLoading ? 0 : ventas.reduce((sum, venta) => sum + venta.cantidad_productos, 0);
 
   return (
     <div className="flex min-h-screen bg-gray-50 font-sans">
@@ -369,7 +410,7 @@ const [filtros, setFiltros] = useState({
           
           <div className="flex flex-wrap items-center gap-2 ml-auto">
             {/* Botón para alternar entre sucursal activa y todas (solo admin) */}
-            {isAdmin && sucursalActiva && (
+            {isAdmin && sucursalIdActiva && (
               <button
                 onClick={toggleVerTodasSucursales}
                 className={`
@@ -441,7 +482,7 @@ const [filtros, setFiltros] = useState({
           </div>
         </div>
 
-        {/* Estadísticas - Colapsable en móvil */}
+        {/* Estadísticas */}
         {mostrarEstadisticas && (
           <div className="mb-6 animate-in slide-in-from-top-5 duration-300">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
@@ -540,7 +581,7 @@ const [filtros, setFiltros] = useState({
           </div>
         )}
 
-        {/* Filtros expandibles - SIN filtro de sucursal */}
+        {/* Filtros expandibles */}
         {mostrarFiltros && (
           <div className="mb-6 animate-in slide-in-from-top-5 duration-300">
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -568,7 +609,7 @@ const [filtros, setFiltros] = useState({
                   usuarios={usuarios}
                   sucursales={sucursales}
                   isAdmin={isAdmin}
-                  ocultarFiltroSucursal={true} // ← NUEVA PROP: ocultar filtro de sucursal
+                  ocultarFiltroSucursal={true}
                   verTodasSucursales={verTodasSucursales}
                 />
               </div>

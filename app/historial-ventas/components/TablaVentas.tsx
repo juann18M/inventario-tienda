@@ -345,16 +345,20 @@ export default function TablaVentas({
     }
   };
 
-  const getUsuarioRolColor = (rol: string) => {
-    switch (rol.toLowerCase()) {
-      case 'admin':
-        return 'bg-gray-800 text-white border border-gray-700';
-      case 'empleado':
-        return 'bg-gray-200 text-gray-800 border border-gray-300';
-      default:
-        return 'bg-gray-100 text-gray-800 border border-gray-200';
-    }
-  };
+  const getUsuarioRolColor = (rol?: string | null) => {
+  const rolSeguro = rol?.toLowerCase?.() || "";
+
+  switch (rolSeguro) {
+    case "admin":
+      return "bg-gray-800 text-white border border-gray-700";
+
+    case "empleado":
+      return "bg-gray-200 text-gray-800 border border-gray-300";
+
+    default:
+      return "bg-gray-100 text-gray-800 border border-gray-200";
+  }
+};
 
   const handleEliminarVenta = (ventaId: number) => {
     setModalEliminar(ventaId);
