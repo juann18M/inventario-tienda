@@ -31,10 +31,7 @@ export async function GET(req: Request) {
           c.*,
           u.nombre as usuario_nombre,
           u.rol as usuario_rol,
-          s.nombre as sucursal_nombre,
-          DATE_FORMAT(c.fecha_apertura, '%Y-%m-%d %H:%i:%s') as fecha_apertura,
-          DATE_FORMAT(c.fecha_cierre, '%Y-%m-%d %H:%i:%s') as fecha_cierre,
-          CASE WHEN c.fecha_cierre IS NULL THEN 'ABIERTA' ELSE 'CERRADA' END as estado
+          s.nombre as sucursal_nombre
         FROM cajas c
         JOIN usuarios u ON c.usuario_id = u.id
         JOIN sucursales s ON c.sucursal_id = s.id
@@ -68,7 +65,7 @@ export async function GET(req: Request) {
         params.push(fechaFin);
       }
 
-      query += ` ORDER BY c.fecha_apertura DESC`;
+      query += ` ORDER BY c.fecha DESC, c.id DESC`;
 
       const [rows]: any = await db.query(query, params);
       return NextResponse.json({ data: rows });
@@ -84,20 +81,19 @@ export async function GET(req: Request) {
       );
     }
 
-    // Obtener caja abierta del día actual (fecha_cierre IS NULL)
+    // Una caja está abierta si monto_final ES IGUAL a monto_inicial (aún no se ha cerrado)
     const [rows]: any = await db.query(
-      `
-      SELECT c.*, u.nombre as usuario_nombre
-      FROM cajas c
-      JOIN usuarios u ON c.usuario_id = u.id
-      WHERE c.sucursal_id = ?
-      AND c.fecha_cierre IS NULL
-      AND c.fecha = CURDATE()
-      ORDER BY c.fecha_apertura DESC
-      LIMIT 1
-      `,
-      [Number(sucursalId)]
-    );
+  `
+  SELECT c.*, u.nombre as usuario_nombre
+  FROM cajas c
+  JOIN usuarios u ON c.usuario_id = u.id
+  WHERE c.sucursal_id = ?
+  AND c.fecha = CURDATE()
+  ORDER BY c.id DESC
+  LIMIT 1
+  `,
+  [Number(sucursalId)]
+);
 
     return NextResponse.json({ data: rows });
 
@@ -153,12 +149,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // Verificar si ya existe caja ABIERTA hoy (sin fecha_cierre)
+    // Verificar si ya existe caja ABIERTA hoy (monto_final = monto_inicial)
     const [existente]: any = await db.query(
       `
       SELECT id FROM cajas
       WHERE sucursal_id = ?
-      AND fecha_cierre IS NULL
+      AND monto_final = monto_inicial
       AND fecha = CURDATE()
       LIMIT 1
       `,
@@ -172,25 +168,25 @@ export async function POST(req: Request) {
         [existente[0].id]
       );
       return NextResponse.json({ 
-        error: "Ya existe una caja abierta",
+        error: "Ya existe una caja abierta hoy",
         data: cajaExistente[0]
       }, { status: 400 });
     }
 
-    // Crear caja (sin columna estado)
+    // Crear caja
     const [result]: any = await db.query(
       `
       INSERT INTO cajas
       (sucursal_id, usuario_id, fecha, monto_inicial, monto_final,
-       total_ventas, total_apartados, diferencia, observaciones,
-       fecha_apertura)
-      VALUES (?, ?, CURDATE(), ?, ?, 0, 0, 0, NULL, NOW())
+       total_ventas, total_apartados, observaciones)
+      VALUES (?, ?, CURDATE(), ?, ?, 0, 0, ?)
       `,
       [
         sucursalId,
         usuarioId,
         Number(monto_inicial),
         Number(monto_inicial),
+        `Apertura de caja - ${new Date().toLocaleTimeString()}`
       ]
     );
 
@@ -248,10 +244,11 @@ export async function PATCH(req: Request) {
         `
         UPDATE cajas
         SET monto_inicial = ?,
-            monto_final = ?
+            monto_final = ?,
+            observaciones = CONCAT(observaciones, ' | Actualizado: $', ?)
         WHERE id = ?
         `,
-        [Number(monto_inicial), Number(monto_inicial), id]
+        [Number(monto_inicial), Number(monto_inicial), Number(monto_inicial), id]
       );
 
       return NextResponse.json({
@@ -262,27 +259,19 @@ export async function PATCH(req: Request) {
 
     // Si está cerrando caja
     if (monto_final !== undefined) {
-      const esperado =
-        Number(caja.monto_inicial) +
-        Number(caja.total_ventas || 0);
-
-      const diferencia =
-        Number(monto_final) - esperado;
-
       await db.query(
         `
         UPDATE cajas
         SET monto_final = ?,
-            diferencia = ?,
-            fecha_cierre = NOW()
+            observaciones = CONCAT(observaciones, ' | Cierre: $', ?, ' ', NOW())
         WHERE id = ?
         `,
-        [Number(monto_final), diferencia, id]
+        [Number(monto_final), Number(monto_final), id]
       );
 
       return NextResponse.json({
         success: true,
-        diferencia,
+        message: "Caja cerrada correctamente",
       });
     }
 

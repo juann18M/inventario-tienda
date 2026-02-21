@@ -59,16 +59,17 @@ export async function POST(req: NextRequest) {
     // VALIDAR CAJA ABIERTA
     // ============================
 
-    const [cajaActiva]: any = await db.query(
-      `
-      SELECT id, monto_inicial, monto_final, total_ventas 
-      FROM cajas
-      WHERE sucursal_id = ?
-      AND estado = 'ABIERTA'
-      LIMIT 1
-      `,
-      [Number(sucursal_id)]
-    );
+   const [cajaActiva]: any = await db.query(
+  `
+  SELECT id, monto_inicial, monto_final, total_ventas 
+  FROM cajas
+  WHERE sucursal_id = ?
+  AND fecha = CURDATE()
+  ORDER BY id DESC
+  LIMIT 1
+  `,
+  [Number(sucursal_id)]
+);
 
     if (!cajaActiva.length) {
       return NextResponse.json(
@@ -138,15 +139,15 @@ export async function POST(req: NextRequest) {
     // SUMAR A CAJA (actualizar montos)
     // ============================
 
-    await db.query(
-      `
-      UPDATE cajas
-      SET total_ventas = total_ventas + ?,
-          monto_final = monto_inicial + (total_ventas + ?)
-      WHERE id = ?
-      `,
-      [totalVenta, totalVenta, cajaId]
-    );
+   await db.query(
+  `
+  UPDATE cajas
+  SET total_ventas = total_ventas + ?,
+      monto_final = monto_final + ?
+  WHERE id = ?
+  `,
+  [totalVenta, totalVenta, cajaId]
+);
 
     console.log(`✅ Venta #${ventaId} registrada. Total: $${totalVenta} sumado a caja ${cajaId}`);
 
