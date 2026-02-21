@@ -301,46 +301,37 @@ export default function Home() {
     if (!montoInicial || Number(montoInicial) <= 0) return;
 
     try {
-      const user = session?.user as SessionUser;
-      
-      console.log("📤 Enviando datos:", {
-        monto_inicial: Number(montoInicial),
-        sucursal: sucursalActiva
-      });
-
       const res = await fetch("/api/dashboard/caja", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          monto_inicial: Number(montoInicial),
-          sucursal: sucursalActiva
+          monto_inicial: Number(montoInicial)
         })
       });
 
       const json = await res.json();
-      console.log("📥 Respuesta:", { status: res.status, ok: res.ok, data: json });
 
       if (!res.ok && json.error?.includes("Ya existe")) {
-        console.log("Caja ya existía, sincronizando...");
-        
         await sincronizarCaja();
         setModalMontoInicial(false);
         return;
       }
 
-      if (res.ok) {
-        await sincronizarCaja();
-        setModalMontoInicial(false);
-        
-        addNotificacion(
-          "Caja Abierta",
-          `Caja aperturada con $${Number(montoInicial).toLocaleString('es-MX')}`,
-          'caja',
-          '/'
-        );
-      } else {
+      if (!res.ok) {
         alert(json.error || "Error al abrir caja");
+        return;
       }
+
+      // 🔥 Esperar sincronización real
+      const cajaActual = await obtenerCajaActual();
+
+      if (cajaActual) {
+        setCajaId(cajaActual.id);
+        setMontoInicial(Number(cajaActual.monto_inicial));
+        setMontoFinal(Number(cajaActual.monto_final));
+      }
+
+      setModalMontoInicial(false);
 
     } catch (error) {
       console.error("Error al abrir caja:", error);
@@ -602,11 +593,13 @@ export default function Home() {
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Caja Inicial</p>
                 <p className="text-lg font-bold text-slate-800">
-                  {montoInicial && Number(montoInicial) > 0 ? `$${Number(montoInicial).toLocaleString("es-MX")}` : '—'}
+                  {montoInicial !== "" && montoInicial !== null 
+                    ? `$${Number(montoInicial).toLocaleString("es-MX")}` 
+                    : "—"}
                 </p>
               </div>
             </div>
-            {montoInicial && Number(montoInicial) > 0 && (
+            {montoInicial !== "" && montoInicial !== null && Number(montoInicial) > 0 && (
               <button 
                 onClick={() => { setTabCaja("inicial"); setModalActualizarCaja(true); }}
                 className="p-2 text-slate-300 hover:text-blue-600 transition-colors"
@@ -625,11 +618,13 @@ export default function Home() {
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Caja Final</p>
                 <p className="text-lg font-bold text-slate-800">
-                  {montoFinal && Number(montoFinal) > 0 ? `$${Number(montoFinal).toLocaleString("es-MX")}` : '—'}
+                  {montoFinal !== "" && montoFinal !== null 
+                    ? `$${Number(montoFinal).toLocaleString("es-MX")}` 
+                    : "—"}
                 </p>
               </div>
             </div>
-            {montoFinal && Number(montoFinal) > 0 && (
+            {montoFinal !== "" && montoFinal !== null && Number(montoFinal) > 0 && (
               <button 
                 onClick={() => { setTabCaja("final"); setModalActualizarCaja(true); }}
                 className="p-2 text-slate-300 hover:text-purple-600 transition-colors"
