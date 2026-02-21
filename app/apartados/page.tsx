@@ -89,7 +89,7 @@ export default function ApartadosPage() {
   const { data: session, status } = useSession();
   const user = session?.user as any;
   const rol = String(user?.role || "").toLowerCase();
-  const sucursalUsuario = user?.sucursal;
+  const sucursalUsuario = user?.sucursal_nombre;
 
   // Estados de Datos
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);

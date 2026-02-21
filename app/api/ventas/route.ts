@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { crearVenta } from "@/lib/ventas";
+import { db } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   try {
     console.log("📨 [API VENTAS] Nueva solicitud recibida");
-    
+
     const session = await getServerSession(authOptions);
 
     if (!session?.user) {
-      console.error("❌ [API VENTAS] No hay sesión activa");
       return NextResponse.json(
         { error: "Sesión expirada. Por favor, inicia sesión nuevamente." },
         { status: 401 }
@@ -19,15 +19,8 @@ export async function POST(req: NextRequest) {
 
     const user = session.user as any;
     const usuarioId = Number(user.id);
-    
-    console.log("👤 [API VENTAS] Usuario autenticado:", {
-      id: usuarioId,
-      email: user.email,
-      name: user.name
-    });
 
     const body = await req.json();
-    console.log("📦 [API VENTAS] Datos recibidos:", body);
 
     const {
       productos,
@@ -37,10 +30,13 @@ export async function POST(req: NextRequest) {
       observaciones,
     } = body;
 
-    // Validaciones básicas
+    // ============================
+    // VALIDACIONES
+    // ============================
+
     if (!productos || !Array.isArray(productos) || productos.length === 0) {
       return NextResponse.json(
-        { error: "El carrito está vacío. Agrega productos para continuar." },
+        { error: "El carrito está vacío." },
         { status: 400 }
       );
     }
@@ -59,36 +55,60 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validar cada producto
+    // ============================
+    // VALIDAR CAJA ABIERTA
+    // ============================
+
+    const [cajaActiva]: any = await db.query(
+      `
+      SELECT id FROM cajas
+      WHERE sucursal_id = ?
+      AND estado = 'ABIERTA'
+      LIMIT 1
+      `,
+      [Number(sucursal_id)]
+    );
+
+    if (!cajaActiva.length) {
+      return NextResponse.json(
+        { error: "No hay una caja abierta en esta sucursal." },
+        { status: 400 }
+      );
+    }
+
+    const cajaId = cajaActiva[0].id;
+
+    // ============================
+    // VALIDAR PRODUCTOS
+    // ============================
+
     const productosValidados = [];
+
     for (const p of productos) {
       if (!p.varianteId || p.varianteId <= 0) {
         return NextResponse.json(
-          { error: "Uno o más productos tienen un ID inválido." },
+          { error: "Uno o más productos tienen ID inválido." },
           { status: 400 }
         );
       }
+
       if (!p.cantidad || p.cantidad <= 0) {
         return NextResponse.json(
-          { error: `La cantidad para el producto ${p.varianteId} debe ser mayor a 0.` },
+          { error: `Cantidad inválida para producto ${p.varianteId}.` },
           { status: 400 }
         );
       }
-      
+
       productosValidados.push({
         varianteId: Number(p.varianteId),
-        cantidad: Number(p.cantidad)
+        cantidad: Number(p.cantidad),
       });
     }
 
-    console.log("🔄 [API VENTAS] Creando venta con datos validados:", {
-      usuarioId,
-      sucursalId: sucursal_id,
-      metodoPago: metodo_pago,
-      productosCount: productosValidados.length
-    });
+    // ============================
+    // CREAR VENTA
+    // ============================
 
-    // Crear la venta
     const ventaId = await crearVenta({
       usuarioId: usuarioId,
       sucursalId: Number(sucursal_id),
@@ -98,29 +118,50 @@ export async function POST(req: NextRequest) {
       productos: productosValidados,
     });
 
-    console.log(`✅ [API VENTAS] Venta creada exitosamente: #${ventaId}`);
+    // ============================
+    // OBTENER TOTAL DE LA VENTA
+    // ============================
 
-    return NextResponse.json({ 
-      success: true, 
+    const [ventaRows]: any = await db.query(
+      "SELECT total FROM ventas WHERE id = ?",
+      [ventaId]
+    );
+
+    if (!ventaRows.length) {
+      throw new Error("Venta creada pero no encontrada");
+    }
+
+    const totalVenta = Number(ventaRows[0].total);
+
+    // ============================
+    // SUMAR A CAJA
+    // ============================
+
+    await db.query(
+      `
+      UPDATE cajas
+      SET total_ventas = total_ventas + ?
+      WHERE id = ?
+      `,
+      [totalVenta, cajaId]
+    );
+
+    console.log(`✅ Venta #${ventaId} registrada y sumada a caja ${cajaId}`);
+
+    return NextResponse.json({
+      success: true,
       ventaId: ventaId,
-      message: "Venta registrada correctamente"
+      message: "Venta registrada correctamente",
     });
 
   } catch (error: any) {
-    console.error("❌ [API VENTAS] Error completo:", {
-      message: error.message,
-      code: (error as any).code
-    });
+    console.error("❌ Error en ventas:", error);
 
-    // Mensajes de error más amigables
-    let errorMessage = "Ocurrió un error al procesar la venta. Por favor, intenta nuevamente.";
-    
-    if (error.message.includes("Stock insuficiente")) {
+    let errorMessage =
+      "Ocurrió un error al procesar la venta.";
+
+    if (error.message?.includes("Stock insuficiente")) {
       errorMessage = error.message;
-    } else if (error.message.includes("no encontrado")) {
-      errorMessage = "Uno de los productos no está disponible en el inventario.";
-    } else if (error.code === 'ER_NO_SUCH_TABLE') {
-      errorMessage = "Error en la base de datos. Contacta al administrador.";
     }
 
     return NextResponse.json(

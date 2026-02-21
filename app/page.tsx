@@ -20,10 +20,12 @@ import {
   ShoppingBag,
 } from "lucide-react";
 
+// ✅ TIPO CORREGIDO: ahora usa sucursal_nombre y sucursal_id
 type SessionUser = {
   name?: string | null;
   role?: string;
-  sucursal?: string | null;
+  sucursal_nombre?: string | null; // 👈 campo correcto para el nombre
+  sucursal_id?: number;             // 👈 nuevo campo para el ID
   id?: number;
 };
 
@@ -257,29 +259,30 @@ export default function Home() {
   /* ================= EFFECT ================= */
 
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated" || !session?.user) return;
 
+    // ✅ LÓGICA CORREGIDA PARA SUCURSALES
     const user = session.user as SessionUser;
     const userRol = String(user.role || "").toLowerCase();
     setRol(userRol);
 
-    // ✅ USAR LA SUCURSAL DEL USUARIO DIRECTAMENTE
-    let sucursal = user.sucursal || SUCURSALES_LISTA[0];
-    
-    console.log("👤 Usuario:", {
-      nombre: user.name,
-      rol: userRol,
-      sucursalAsignada: user.sucursal,
-      sucursalFinal: sucursal
-    });
+    let sucursal: string | null = null;
 
-    // Solo los admin pueden cambiar de sucursal
+    // Los admin pueden cambiar de sucursal (guardada en localStorage)
     if (userRol === "admin") {
-      const guardada = localStorage.getItem("sucursalActiva");
-      if (guardada && SUCURSALES_LISTA.includes(guardada)) {
-        sucursal = guardada;
-        console.log("👑 Admin usando sucursal guardada:", sucursal);
-      }
+      sucursal = localStorage.getItem("sucursalActiva") || SUCURSALES_LISTA[0];
+      console.log("👑 Admin usando sucursal:", sucursal);
+    } else {
+      // Los empleados tienen su sucursal fija del perfil
+      sucursal = user.sucursal_nombre || null; // 👈 ahora usa el campo correcto
+      console.log("🧑‍💼 Empleado con sucursal asignada:", sucursal);
+    }
+
+    // Validación crítica
+    if (!sucursal) {
+      console.error("⛔ Usuario sin sucursal asignada", { user, userRol });
+      // Aquí podrías mostrar un mensaje de error al usuario
+      return;
     }
 
     setSucursalActiva(sucursal);
@@ -292,7 +295,7 @@ export default function Home() {
       '/'
     );
     
-  }, [status, session]);
+  }, [status, session, fetchDashboardData]);
 
   /* ================= HANDLERS ================= */
 

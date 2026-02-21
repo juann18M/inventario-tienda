@@ -65,7 +65,7 @@ export default function InventarioPage() {
   const { data: session, status } = useSession();
   const user = session?.user as any;
   const rol = String(user?.role || "").toLowerCase();
-  const sucursalUsuario = user?.sucursal;
+  const sucursalUsuario = user?.sucursal_nombre;
 
   // Estados de Datos
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -111,16 +111,27 @@ export default function InventarioPage() {
   );
 
   // --- SINCRONIZACIÓN SUCURSAL ---
-  useEffect(() => {
-    if (status === "authenticated" && !tieneSeleccionManual.current) {
-      if (rol === "admin") {
-        const guardada = localStorage.getItem("sucursalActiva");
-        setSucursalSeleccionada(guardada && SUCURSALES_LISTA.includes(guardada) ? guardada : SUCURSALES_LISTA[0]);
+ useEffect(() => {
+  if (status === "authenticated" && !tieneSeleccionManual.current) {
+
+    if (rol === "admin") {
+      const guardada = localStorage.getItem("sucursalActiva");
+      setSucursalSeleccionada(
+        guardada && SUCURSALES_LISTA.includes(guardada)
+          ? guardada
+          : SUCURSALES_LISTA[0]
+      );
+    } else {
+      // 👇 EMPLEADO USA SU SUCURSAL REAL DE LA SESIÓN
+      if (user?.sucursal_nombre) {
+        setSucursalSeleccionada(user.sucursal_nombre);
       } else {
-        setSucursalSeleccionada(sucursalUsuario || SUCURSALES_LISTA[0]);
+        console.error("Empleado sin sucursal asignada");
       }
     }
-  }, [status, rol, sucursalUsuario]);
+
+  }
+}, [status, rol, user]);
 
   // --- FETCH INVENTARIO - CORREGIDO ---
   const fetchInventario = useCallback(async () => {

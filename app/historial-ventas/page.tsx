@@ -366,7 +366,7 @@ export default function HistorialVentasPage() {
       if (sucursalIdActiva) return ID_SUCURSALES_MAP[sucursalIdActiva] || `Sucursal ${sucursalIdActiva}`;
       return "Selecciona una sucursal";
     }
-    return user?.sucursal || "No asignada";
+    return user?.sucursal_nombre || "No asignada";
   };
 
   // Calcular estadísticas

@@ -85,22 +85,31 @@ export default function VentasPage() {
      CONFIGURAR SUCURSAL
   ======================= */
   useEffect(() => {
-    if (status === "loading" || !session?.user) return;
+  if (status === "loading" || !session?.user) return;
 
-    const user: any = session.user;
-    const isAdmin = user.role?.toLowerCase() === "admin";
+  const user: any = session.user;
+  const isAdmin = user.role?.toLowerCase() === "admin";
 
-    if (isAdmin) {
-      const nombre = localStorage.getItem("sucursalActiva") || user.sucursal || "Centro Isidro Huarte 1";
-      setSucursalNombre(nombre);
-      setSucursalId(SUCURSALES_MAP[nombre] || 1);
-    } else {
-      const id = user.sucursal_id || 1;
-      const nombre = user.sucursal || ID_SUCURSALES_MAP[id] || "Centro Isidro Huarte 1";
-      setSucursalId(id);
-      setSucursalNombre(nombre);
-    }
-  }, [session, status]);
+  // 🔥 usamos lo que realmente viene de NextAuth
+  const sucursalNombreSesion = user.sucursal_nombre;
+  const sucursalIdSesion = user.sucursal_id;
+
+  if (isAdmin) {
+    const nombre =
+      localStorage.getItem("sucursalActiva") ||
+      sucursalNombreSesion ||
+      "Centro Isidro Huarte 1";
+
+    setSucursalNombre(nombre);
+    setSucursalId(SUCURSALES_MAP[nombre] || sucursalIdSesion || 1);
+
+  } else {
+    // 👤 Empleado SIEMPRE usa su sucursal real
+    setSucursalNombre(sucursalNombreSesion || "Centro Isidro Huarte 1");
+    setSucursalId(sucursalIdSesion || 1);
+  }
+
+}, [session, status]);
 
   /* =======================
      CARGAR PRODUCTOS
