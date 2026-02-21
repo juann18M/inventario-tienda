@@ -252,7 +252,7 @@ export default function ReportesPage() {
       
       // Determinar el nombre de la sucursal para el reporte
       let nombreSucursal = "Todas las sucursales";
-      let sucursalId = null;
+      let sucursalId: number | null = null;
       
       if (!isAdmin) {
         // Usuario normal
