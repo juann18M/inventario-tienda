@@ -5,17 +5,20 @@ declare global {
   var mysqlPool: mysql.Pool | undefined;
 }
 
+// Configuración mejorada para soportar tanto URL de la nube como objeto local
 export const db =
   global.mysqlPool ??
-  mysql.createPool({
-    host: "localhost",
-    user: "root",
-    password: "2026",
-    database: "inventario_tienda",
-    waitForConnections: true,
-    connectionLimit: 5, // 👈 BAJO en dev
-    queueLimit: 0,
-  });
+  (process.env.DATABASE_URL
+    ? mysql.createPool(process.env.DATABASE_URL)
+    : mysql.createPool({
+        host: "localhost",
+        user: "root",
+        password: "2026",
+        database: "inventario_tienda",
+        waitForConnections: true,
+        connectionLimit: 5,
+        queueLimit: 0,
+      }));
 
 if (process.env.NODE_ENV !== "production") {
   global.mysqlPool = db;
