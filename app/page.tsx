@@ -2,7 +2,7 @@
 
 import Sidebar from "./components/Sidebar";
 import { useSession, signOut } from "next-auth/react";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import {
   Wallet,
@@ -48,6 +48,7 @@ const SUCURSALES_LISTA = [
 
 export default function Home() {
   const { data: session, status } = useSession();
+  const userRef = useRef<SessionUser | null>(null);
 
   const [rol, setRol] = useState("");
   const [sucursalActiva, setSucursalActiva] = useState<string | null>(null);
@@ -130,7 +131,7 @@ export default function Home() {
       const json = await res.json();
       console.log("📦 Respuesta completa:", json);
 
-      const caja = json.caja;
+      const caja = json.data?.[0];
       console.log("💰 Caja encontrada:", caja);
 
       if (caja) {
@@ -162,88 +163,90 @@ export default function Home() {
 
   /* ================= DATA ================= */
 
-  const fetchDashboardData = useCallback(
-    async () => {
-      try {
-        setIsLoading(true);
-        
-        const user = session?.user as SessionUser;
-        const isAdmin = user?.role?.toLowerCase() === "admin";
+  const fetchDashboardData = async () => {
+    try {
+      setIsLoading(true);
+      
+      const user = session?.user as SessionUser;
+      const isAdmin = user?.role?.toLowerCase() === "admin";
 
-        // Caja - SOLO para empleados
-        if (!isAdmin && user?.sucursal_id) {
-          const cajaExiste = await sincronizarCaja();
+      // Caja - SOLO para empleados
+      if (!isAdmin && user?.sucursal_id) {
+        const cajaExiste = await sincronizarCaja();
 
-          const storageKey = `caja_apertura_${user.sucursal_id}_${new Date().toDateString()}`;
-          const yaPreguntada = sessionStorage.getItem(storageKey);
+        const storageKey = `caja_apertura_${user.sucursal_id}_${new Date().toDateString()}`;
+        const yaPreguntada = sessionStorage.getItem(storageKey);
 
-          if (!cajaExiste && !yaPreguntada) {
-            console.log("🆕 Mostrando modal de apertura");
-            setModalMontoInicial(true);
-            sessionStorage.setItem(storageKey, "true");
-          }
-        } else {
-          setCajaId(null);
-          setMontoInicial(0);
-          setMontoFinal(0);
+        if (!cajaExiste && !yaPreguntada && !modalMontoInicial) {
+          console.log("🆕 Mostrando modal de apertura");
+          setModalMontoInicial(true);
+          sessionStorage.setItem(storageKey, "true");
         }
-
-        // Estadísticas
-        if (user?.sucursal_id) {
-          const resStats = await fetch(
-            `/api/dashboard/stats?sucursal_id=${user.sucursal_id}`,
-            { cache: 'no-store' }
-          );
-          const jsonStats = await resStats.json();
-
-          if (jsonStats.success) {
-            setVentasHoy(Number(jsonStats.totalVentas || 0));
-            setApartadosActivos(Number(jsonStats.apartadosActivos || 0));
-            setApartadosPendientes(Number(jsonStats.apartadosPendientes || 0));
-            setVentasCount(Number(jsonStats.cantidadVentas || 0));
-            setStockBajo(Number(jsonStats.stockBajo || 0));
-            setVentasSemana(jsonStats.ventasSemana || [0,0,0,0,0,0,0]);
-            
-            // Datos para alertas
-            setProductosLentos(jsonStats.productosLentos || []);
-            setClientesPendientesHoy(jsonStats.clientesPendientes || []);
-            setProductoTopHoy(jsonStats.productoTopHoy || null);
-            
-            // Notificaciones
-            if (jsonStats.apartadosPendientes > 0) {
-              addNotificacion(
-                "Apartados Pendientes",
-                `${jsonStats.apartadosPendientes} apartado${jsonStats.apartadosPendientes !== 1 ? 's' : ''} por cobrar hoy`,
-                'apartado',
-                '/apartados?filter=pendientes'
-              );
-            }
-            
-            if (jsonStats.stockBajo > 0) {
-              addNotificacion(
-                "Stock Bajo",
-                `${jsonStats.stockBajo} producto${jsonStats.stockBajo !== 1 ? 's' : ''} con stock crítico`,
-                'inventario',
-                '/inventario?filter=stockBajo'
-              );
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error dashboard:", err);
-      } finally {
-        setIsLoading(false);
+      } else {
+        setCajaId(null);
+        setMontoInicial(0);
+        setMontoFinal(0);
       }
-    },
-    [session]
-  );
+
+      // Estadísticas
+      if (user?.sucursal_id) {
+        const resStats = await fetch(
+          `/api/dashboard/stats?sucursal_id=${user.sucursal_id}`,
+          { cache: 'no-store' }
+        );
+        const jsonStats = await resStats.json();
+
+        if (jsonStats.success) {
+          setVentasHoy(Number(jsonStats.totalVentas || 0));
+          setApartadosActivos(Number(jsonStats.apartadosActivos || 0));
+          setApartadosPendientes(Number(jsonStats.apartadosPendientes || 0));
+          setVentasCount(Number(jsonStats.cantidadVentas || 0));
+          setStockBajo(Number(jsonStats.stockBajo || 0));
+          setVentasSemana(jsonStats.ventasSemana || [0,0,0,0,0,0,0]);
+          
+          // Datos para alertas
+          setProductosLentos(jsonStats.productosLentos || []);
+          setClientesPendientesHoy(jsonStats.clientesPendientes || []);
+          setProductoTopHoy(jsonStats.productoTopHoy || null);
+          
+          // Notificaciones
+          if (jsonStats.apartadosPendientes > 0) {
+            addNotificacion(
+              "Apartados Pendientes",
+              `${jsonStats.apartadosPendientes} apartado${jsonStats.apartadosPendientes !== 1 ? 's' : ''} por cobrar hoy`,
+              'apartado',
+              '/apartados?filter=pendientes'
+            );
+          }
+          
+          if (jsonStats.stockBajo > 0) {
+            addNotificacion(
+              "Stock Bajo",
+              `${jsonStats.stockBajo} producto${jsonStats.stockBajo !== 1 ? 's' : ''} con stock crítico`,
+              'inventario',
+              '/inventario?filter=stockBajo'
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error dashboard:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   /* ================= EFFECT ================= */
 
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
 
+    // ✅ evitar múltiples ejecuciones
+    if (userRef.current) return;
+
     const user = session.user as SessionUser;
+    userRef.current = user;
+
     const userRol = String(user.role || "").toLowerCase();
     setRol(userRol);
 
@@ -272,7 +275,7 @@ export default function Home() {
       '/'
     );
     
-  }, [status, session, fetchDashboardData]);
+  }, [status]); // ✅ Solo depende de status, no de session
 
   /* ================= HANDLERS ================= */
 
@@ -283,10 +286,10 @@ export default function Home() {
       const res = await fetch("/api/dashboard/caja", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-       body: JSON.stringify({
-  monto_inicial: Number(montoInicial),
-  sucursal_id: (session?.user as SessionUser)?.sucursal_id
-})
+        body: JSON.stringify({
+          monto_inicial: Number(montoInicial),
+          sucursal_id: (session?.user as SessionUser)?.sucursal_id
+        })
       });
 
       const json = await res.json();
