@@ -123,20 +123,33 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `/api/dashboard/caja?sucursal=${encodeURIComponent(sucursalAUsar)}`,
-        { cache: 'no-store' }
-      );
-      const json = await res.json();
-      
-      if (json?.data && json.data.length > 0) {
-        return json.data[0];
-      }
-      return null;
-    } catch (error) {
-      console.error("Error al obtener caja:", error);
-      return null;
-    }
+  `/api/dashboard/caja?sucursal=${encodeURIComponent(sucursalAUsar)}`,
+  {
+    cache: "no-store",
+    credentials: "include",
+  }
+);
+
+// ✅ evitar error "Unexpected token '<'"
+if (!res.ok) {
+  const text = await res.text();
+  console.error("Respuesta no válida:", text);
+  return null;
+}
+
+const json = await res.json();
+
+if (json?.data && json.data.length > 0) {
+  return json.data[0];
+}
+
+return null;
+} catch (error) {
+  console.error("Error al obtener caja:", error);
+  return null;
+}
   };
+  
 
   const sincronizarCaja = async (sucursal: string) => {
     try {
@@ -366,10 +379,11 @@ const handlerActualizar = async () => {
     }
 
     const res = await fetch("/api/dashboard/caja", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  credentials: "include",
+  body: JSON.stringify(body)
+});
 
     const json = await res.json();
 
@@ -412,13 +426,14 @@ const handlerActualizar = async () => {
         if (!montoFinal || Number(montoFinal) <= 0) return;
 
         await fetch("/api/dashboard/caja", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: caja.id,
-            monto_final: Number(montoFinal)
-          })
-        });
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  credentials: "include",
+  body: JSON.stringify({
+    id: caja.id,
+    monto_final: Number(montoFinal)
+  })
+});
       }
 
       const keys = Object.keys(sessionStorage);
