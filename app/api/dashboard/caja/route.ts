@@ -3,9 +3,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-/* =====================================================
-   GET — Caja actual o historial
-===================================================== */
+/* =========================
+   GET - Obtener caja actual o historial
+========================= */
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
 
@@ -15,11 +15,64 @@ export async function GET(req: Request) {
 
   try {
     const { searchParams } = new URL(req.url);
+    const sucursal = searchParams.get("sucursal");
     const historial = searchParams.get("historial") === "true";
+    const empleadoId = searchParams.get("empleadoId");
+    const fechaInicio = searchParams.get("fechaInicio");
+    const fechaFin = searchParams.get("fechaFin");
 
     const user = session.user as any;
-    const role = user?.role?.toLowerCase?.() ?? "";
-    const sucursalId = Number(user?.sucursal_id);
+    const userRole = user.role?.toLowerCase();
+
+    // Si es historial
+    if (historial) {
+      let query = `
+        SELECT 
+          c.*,
+          u.nombre as usuario_nombre,
+          u.rol as usuario_rol,
+          s.nombre as sucursal_nombre
+        FROM cajas c
+        JOIN usuarios u ON c.usuario_id = u.id
+        JOIN sucursales s ON c.sucursal_id = s.id
+        WHERE 1=1
+      `;
+      
+      const params: any[] = [];
+
+      // Filtros - admin y jefe pueden ver todo
+      if (userRole === 'admin' || userRole === 'jefe') {
+        if (sucursal) {
+          query += ` AND s.nombre = ?`;
+          params.push(sucursal);
+        }
+        if (empleadoId) {
+          query += ` AND c.usuario_id = ?`;
+          params.push(empleadoId);
+        }
+      } else {
+        // Empleado solo ve su historial
+        query += ` AND c.usuario_id = ?`;
+        params.push(user.id);
+      }
+
+      if (fechaInicio) {
+        query += ` AND c.fecha >= ?`;
+        params.push(fechaInicio);
+      }
+      if (fechaFin) {
+        query += ` AND c.fecha <= ?`;
+        params.push(fechaFin);
+      }
+
+      query += ` ORDER BY c.fecha DESC, c.id DESC`;
+
+      const [rows]: any = await db.query(query, params);
+      return NextResponse.json({ data: rows });
+    }
+
+    // Si no es historial, obtener caja ABIERTA del día actual
+    const sucursalId = user.sucursal_id;
 
     if (!sucursalId) {
       return NextResponse.json(
@@ -28,47 +81,24 @@ export async function GET(req: Request) {
       );
     }
 
-    /* ================= HISTORIAL ================= */
-    if (historial) {
-      let query = `
-        SELECT c.*, u.nombre AS usuario_nombre
-        FROM cajas c
-        JOIN usuarios u ON c.usuario_id = u.id
-        WHERE 1=1
-      `;
-
-      const params: any[] = [];
-
-      if (role !== "admin" && role !== "jefe") {
-        query += ` AND c.usuario_id = ?`;
-        params.push(user.id);
-      }
-
-      query += ` ORDER BY c.fecha DESC, c.id DESC`;
-
-      const [rows]: any = await db.query(query, params);
-
-      return NextResponse.json({ data: rows ?? [] });
-    }
-
-    /* ================= CAJA ABIERTA ================= */
+    // Una caja está abierta si monto_final ES IGUAL a monto_inicial (aún no se ha cerrado)
     const [rows]: any = await db.query(
-      `
-      SELECT c.*, u.nombre AS usuario_nombre
-      FROM cajas c
-      JOIN usuarios u ON c.usuario_id = u.id
-      WHERE c.sucursal_id = ?
-      AND c.estado='ABIERTA'
-      ORDER BY c.id DESC
-      LIMIT 1
-      `,
-      [sucursalId]
-    );
+  `
+  SELECT c.*, u.nombre as usuario_nombre
+  FROM cajas c
+  JOIN usuarios u ON c.usuario_id = u.id
+  WHERE c.sucursal_id = ?
+  AND c.estado = 'ABIERTA'
+  ORDER BY c.id DESC
+  LIMIT 1
+  `,
+  [Number(sucursalId)]
+);
 
-    return NextResponse.json({ data: rows ?? [] });
+    return NextResponse.json({ data: rows });
+
   } catch (error) {
     console.error("❌ Error GET caja:", error);
-
     return NextResponse.json(
       { error: "Error al obtener caja" },
       { status: 500 }
@@ -76,9 +106,9 @@ export async function GET(req: Request) {
   }
 }
 
-/* =====================================================
-   POST — Abrir Caja
-===================================================== */
+/* =========================
+   POST - Abrir Caja
+========================= */
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
 
@@ -87,10 +117,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json();
-    const montoInicial = Number(body.monto_inicial);
+    const { monto_inicial, sucursal } = await req.json();
 
-    if (!Number.isFinite(montoInicial) || montoInicial < 0) {
+    if (!monto_inicial || Number(monto_inicial) <= 0) {
       return NextResponse.json(
         { error: "Monto inicial inválido" },
         { status: 400 }
@@ -98,52 +127,75 @@ export async function POST(req: Request) {
     }
 
     const user = session.user as any;
+    const usuarioId = Number(user.id);
+    let sucursalId = Number(user.sucursal_id);
 
-    const [existente]: any = await db.query(
-      `SELECT id FROM cajas
-       WHERE sucursal_id=? AND estado='ABIERTA'
-       LIMIT 1`,
-      [user.sucursal_id]
-    );
+    // Si es admin/jefe y envió sucursal por nombre, buscar el ID
+    const userRole = user.role?.toLowerCase();
+    if ((userRole === 'admin' || userRole === 'jefe') && sucursal) {
+      const [sucursalRows]: any = await db.query(
+        "SELECT id FROM sucursales WHERE nombre = ?",
+        [sucursal]
+      );
+      if (sucursalRows.length) {
+        sucursalId = sucursalRows[0].id;
+      }
+    }
 
-    if (existente.length > 0) {
+    if (!sucursalId) {
       return NextResponse.json(
-        { error: "Ya existe una caja abierta" },
+        { error: "Usuario sin sucursal asignada" },
         { status: 400 }
       );
     }
 
+    // Verificar si ya existe caja ABIERTA hoy (monto_final = monto_inicial)
+   const [existente]: any = await db.query(
+  `
+  SELECT id FROM cajas
+  WHERE sucursal_id = ?
+  AND estado = 'ABIERTA'
+  LIMIT 1
+  `,
+  [sucursalId]
+);
+
+    if (existente.length) {
+      // Si existe, devolvemos sus datos
+      const [cajaExistente]: any = await db.query(
+        "SELECT * FROM cajas WHERE id = ?",
+        [existente[0].id]
+      );
+      return NextResponse.json({ 
+        error: "Ya existe una caja abierta hoy",
+        data: cajaExistente[0]
+      }, { status: 400 });
+    }
+
+    // Crear caja
     const [result]: any = await db.query(
       `
       INSERT INTO cajas
-      (sucursal_id,usuario_id,fecha,
-       monto_inicial,monto_final,
-       total_ventas,total_transacciones,
-       total_apartados,estado,observaciones)
-      VALUES (?, ?, CURDATE(), ?, ?, 0,0,0,'ABIERTA',?)
+      (sucursal_id, usuario_id, fecha, monto_inicial, monto_final,
+       total_ventas, total_apartados, observaciones)
+      VALUES (?, ?, CURDATE(), ?, ?, 0, 0, ?)
       `,
       [
-        user.sucursal_id,
-        user.id,
-        montoInicial,
-        montoInicial,
-        "Apertura de caja",
+        sucursalId,
+        usuarioId,
+        Number(monto_inicial),
+        Number(monto_inicial),
+        `Apertura de caja - ${new Date().toLocaleTimeString()}`
       ]
     );
 
-    await db.query(
-      `
-      INSERT INTO movimientos_caja
-      (caja_id,tipo,monto,descripcion,usuario_id)
-      VALUES (?, 'APERTURA', ?, ?, ?)
-      `,
-      [result.insertId, montoInicial, "Apertura de caja", user.id]
-    );
+    return NextResponse.json({
+      success: true,
+      id: result.insertId,
+    });
 
-    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("❌ Error POST caja:", error);
-
+    console.error("❌ Error POST abrir caja:", error);
     return NextResponse.json(
       { error: "Error al abrir caja" },
       { status: 500 }
@@ -151,9 +203,9 @@ export async function POST(req: Request) {
   }
 }
 
-/* =====================================================
-   PATCH — Ajustar o Cerrar Caja (FIX DEFINITIVO)
-===================================================== */
+/* =========================
+   PATCH - Actualizar/Cerrar Caja
+========================= */
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
 
@@ -162,27 +214,17 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const body = await req.json();
+    const { id, monto_inicial, monto_final } = await req.json();
 
-    const id = Number(body.id);
-    const montoInicial =
-      body.monto_inicial !== undefined
-        ? Number(body.monto_inicial)
-        : undefined;
-
-    const montoFinal =
-      body.monto_final !== undefined
-        ? Number(body.monto_final)
-        : undefined;
-
-    if (!Number.isFinite(id)) {
-      return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+    if (!id) {
+      return NextResponse.json(
+        { error: "ID de caja requerido" },
+        { status: 400 }
+      );
     }
 
-    const user = session.user as any;
-
     const [rows]: any = await db.query(
-      `SELECT * FROM cajas WHERE id=? LIMIT 1`,
+      "SELECT * FROM cajas WHERE id = ?",
       [id]
     );
 
@@ -195,87 +237,52 @@ export async function PATCH(req: Request) {
 
     const caja = rows[0];
 
-    /* =====================================================
-       ✅ AJUSTE (aunque frontend mande ambos valores)
-    ===================================================== */
-    if (
-      montoInicial !== undefined &&
-      Number(montoInicial) !== Number(caja.monto_inicial)
-    ) {
-      const diferencia =
-        montoInicial - Number(caja.monto_inicial);
-
+    // Si solo actualiza monto inicial
+    if (monto_inicial !== undefined && monto_final === undefined) {
       await db.query(
-        `
-        UPDATE cajas
-        SET monto_inicial=?,
-            monto_final=monto_final+?
-        WHERE id=?
-        `,
-        [montoInicial, diferencia, id]
-      );
+  `
+  UPDATE cajas
+  SET monto_final = ?,
+      estado = 'CERRADA',
+      fecha_cierre = NOW(),
+      observaciones = CONCAT(IFNULL(observaciones,''), ' | Cierre: $', ?)
+  WHERE id = ?
+  `,
+  [Number(monto_final), Number(monto_final), id]
+);
 
-      await db.query(
-        `
-        INSERT INTO movimientos_caja
-        (caja_id,tipo,monto,descripcion,usuario_id)
-        VALUES (?, 'AJUSTE_INICIAL', ?, ?, ?)
-        `,
-        [id, diferencia, "Ajuste monto inicial", user.id]
-      );
-
-      return NextResponse.json({ success: true });
+      return NextResponse.json({
+        success: true,
+        message: "Monto inicial actualizado",
+      });
     }
 
-    /* =====================================================
-       ✅ CIERRE
-    ===================================================== */
-    if (montoFinal !== undefined) {
-      if (caja.estado === "CERRADA") {
-        return NextResponse.json(
-          { error: "La caja ya está cerrada" },
-          { status: 400 }
-        );
-      }
+    // Si está cerrando caja
+    if (monto_final !== undefined) {
+     await db.query(
+  `
+  UPDATE cajas
+  SET monto_final = ?,
+      estado = 'CERRADA',
+      observaciones = CONCAT(observaciones, ' | Cierre: $', ?, ' ', NOW())
+  WHERE id = ?
+  `,
+  [Number(monto_final), Number(monto_final), id]
+);
 
-      const diferencia =
-        montoFinal - Number(caja.monto_final);
-
-      await db.query(
-        `
-        UPDATE cajas
-        SET monto_final=?,
-            estado='CERRADA',
-            fecha_cierre=NOW()
-        WHERE id=?
-        `,
-        [montoFinal, id]
-      );
-
-      await db.query(
-        `
-        INSERT INTO movimientos_caja
-        (caja_id,tipo,monto,descripcion,usuario_id)
-        VALUES (?, 'CIERRE', ?, ?, ?)
-        `,
-        [
-          id,
-          diferencia,
-          `Cierre de caja. Diferencia: ${diferencia}`,
-          user.id,
-        ]
-      );
-
-      return NextResponse.json({ success: true });
+      return NextResponse.json({
+        success: true,
+        message: "Caja cerrada correctamente",
+      });
     }
 
     return NextResponse.json(
-      { error: "Sin cambios detectados" },
+      { error: "Operación no válida" },
       { status: 400 }
     );
+
   } catch (error) {
     console.error("❌ Error PATCH caja:", error);
-
     return NextResponse.json(
       { error: "Error al actualizar caja" },
       { status: 500 }
