@@ -12,21 +12,27 @@ export default function Home() {
   const [montoInicial, setMontoInicial] = useState("");
 
   /* ===============================
-     VERIFICAR CAJA AL INICIAR
+     VERIFICAR CAJA AL LOGIN
   =============================== */
   useEffect(() => {
-    if (!session) return;
+    // 🔥 esperar sesión lista
+    if (status !== "authenticated") return;
 
     const cargarCaja = async () => {
-      const res = await fetch("/api/caja");
-      const data = await res.json();
+      try {
+        const res = await fetch("/api/caja");
+        const data = await res.json();
 
-      setCaja(data.data);
-      setLoading(false);
+        setCaja(data.data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false); // ✅ SIEMPRE se ejecuta
+      }
     };
 
     cargarCaja();
-  }, [session]);
+  }, [status]);
 
   /* ===============================
      ABRIR CAJA
@@ -45,16 +51,17 @@ export default function Home() {
     const data = await res.json();
 
     if (data.success) {
-      setCaja({
-        monto_inicial: data.monto_inicial,
-      });
+      setCaja({ monto_inicial: data.monto_inicial });
     } else {
       alert(data.error);
     }
   };
 
+  /* ===============================
+     LOADING REAL
+  =============================== */
   if (status === "loading" || loading) {
-    return <div>Cargando...</div>;
+    return <div className="p-6">Cargando...</div>;
   }
 
   return (
@@ -87,9 +94,9 @@ export default function Home() {
 
             <input
               type="number"
-              placeholder="Monto inicial"
               value={montoInicial}
               onChange={(e) => setMontoInicial(e.target.value)}
+              placeholder="Monto inicial"
               className="border w-full p-2 rounded mb-4"
             />
 
