@@ -2,7 +2,7 @@
 
 import Sidebar from "./components/Sidebar";
 import { useSession, signOut } from "next-auth/react";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   Wallet,
@@ -20,13 +20,14 @@ import {
   ShoppingBag,
 } from "lucide-react";
 
-// ✅ TIPO CORREGIDO
+// ✅ TIPO CORREGIDO: ahora usa sucursal_nombre y sucursal_id
 type SessionUser = {
   name?: string | null;
   role?: string;
-  sucursal_nombre?: string | null;
-  sucursal_id?: number;
+  sucursal_nombre?: string | null; // 👈 campo correcto para el nombre
+  sucursal_id?: number;             // 👈 nuevo campo para el ID
   id?: number;
+  
 };
 
 interface Notificacion {
@@ -48,7 +49,6 @@ const SUCURSALES_LISTA = [
 
 export default function Home() {
   const { data: session, status } = useSession();
-  const userRef = useRef<SessionUser | null>(null);
 
   const [rol, setRol] = useState("");
   const [sucursalActiva, setSucursalActiva] = useState<string | null>(null);
@@ -117,15 +117,33 @@ export default function Home() {
 
   /* ================= HELPERS ================= */
 
-  const sincronizarCaja = async () => {
-    const user = session?.user as SessionUser;
-    if (!user?.sucursal_id) return false;
+  const obtenerCajaActual = async (sucursal?: string) => {
+    const sucursalAUsar = sucursal || sucursalActiva;
+    if (!sucursalAUsar) return null;
 
     try {
-      console.log("🔍 Sincronizando caja para sucursal ID:", user.sucursal_id);
+      const res = await fetch(
+        `/api/dashboard/caja?sucursal=${encodeURIComponent(sucursalAUsar)}`,
+        { cache: 'no-store' }
+      );
+      const json = await res.json();
+      
+      if (json?.data && json.data.length > 0) {
+        return json.data[0];
+      }
+      return null;
+    } catch (error) {
+      console.error("Error al obtener caja:", error);
+      return null;
+    }
+  };
+
+  const sincronizarCaja = async (sucursal: string) => {
+    try {
+      console.log("🔍 Sincronizando caja para:", sucursal);
 
       const res = await fetch(
-        `/api/dashboard/caja?sucursal_id=${user.sucursal_id}`
+        `/api/dashboard/caja?sucursal=${encodeURIComponent(sucursal)}`
       );
 
       const json = await res.json();
@@ -163,35 +181,37 @@ export default function Home() {
 
   /* ================= DATA ================= */
 
-  const fetchDashboardData = async () => {
-    try {
-      setIsLoading(true);
-      
-      const user = session?.user as SessionUser;
-      const isAdmin = user?.role?.toLowerCase() === "admin";
+  const fetchDashboardData = useCallback(
+    async (sucursal: string) => {
+      try {
+        setIsLoading(true);
+        
+        console.log("📊 Fetching data para sucursal:", sucursal);
 
-      // Caja - SOLO para empleados
-      if (!isAdmin && user?.sucursal_id) {
-        const cajaExiste = await sincronizarCaja();
+        const user = session?.user as SessionUser;
+        const isAdmin = user?.role?.toLowerCase() === "admin";
 
-        const storageKey = `caja_apertura_${user.sucursal_id}_${new Date().toDateString()}`;
-        const yaPreguntada = sessionStorage.getItem(storageKey);
+        // Caja - SOLO para empleados
+        if (!isAdmin) {
+          const cajaExiste = await sincronizarCaja(sucursal);
 
-        if (!cajaExiste && !yaPreguntada && !modalMontoInicial) {
-          console.log("🆕 Mostrando modal de apertura");
-          setModalMontoInicial(true);
-          sessionStorage.setItem(storageKey, "true");
+          const storageKey = `caja_apertura_${sucursal}_${new Date().toDateString()}`;
+          const yaPreguntada = sessionStorage.getItem(storageKey);
+
+          if (!cajaExiste && !yaPreguntada) {
+            console.log("🆕 Mostrando modal de apertura");
+            setModalMontoInicial(true);
+            sessionStorage.setItem(storageKey, "true");
+          }
+        } else {
+          setCajaId(null);
+          setMontoInicial(0);
+          setMontoFinal(0);
         }
-      } else {
-        setCajaId(null);
-        setMontoInicial(0);
-        setMontoFinal(0);
-      }
 
-      // Estadísticas
-      if (user?.sucursal_id) {
+        // Estadísticas
         const resStats = await fetch(
-          `/api/dashboard/stats?sucursal_id=${user.sucursal_id}`,
+          `/api/dashboard/stats?sucursal=${encodeURIComponent(sucursal)}`,
           { cache: 'no-store' }
         );
         const jsonStats = await resStats.json();
@@ -228,45 +248,46 @@ export default function Home() {
             );
           }
         }
+      } catch (err) {
+        console.error("Error dashboard:", err);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      console.error("Error dashboard:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+    [session]
+  );
 
   /* ================= EFFECT ================= */
 
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
 
-    // ✅ evitar múltiples ejecuciones
-    if (userRef.current) return;
-
+    // ✅ LÓGICA CORREGIDA PARA SUCURSALES
     const user = session.user as SessionUser;
-    userRef.current = user;
-
     const userRol = String(user.role || "").toLowerCase();
     setRol(userRol);
 
     let sucursal: string | null = null;
 
+    // Los admin pueden cambiar de sucursal (guardada en localStorage)
     if (userRol === "admin") {
       sucursal = localStorage.getItem("sucursalActiva") || SUCURSALES_LISTA[0];
       console.log("👑 Admin usando sucursal:", sucursal);
     } else {
-      sucursal = user.sucursal_nombre || null;
+      // Los empleados tienen su sucursal fija del perfil
+      sucursal = user.sucursal_nombre || null; // 👈 ahora usa el campo correcto
       console.log("🧑‍💼 Empleado con sucursal asignada:", sucursal);
     }
 
+    // Validación crítica
     if (!sucursal) {
       console.error("⛔ Usuario sin sucursal asignada", { user, userRol });
+      // Aquí podrías mostrar un mensaje de error al usuario
       return;
     }
 
     setSucursalActiva(sucursal);
-    fetchDashboardData();
+    fetchDashboardData(sucursal);
     
     addNotificacion(
       "Bienvenido",
@@ -275,7 +296,7 @@ export default function Home() {
       '/'
     );
     
-  }, [status]); // ✅ Solo depende de status, no de session
+  }, [status, session, fetchDashboardData]);
 
   /* ================= HANDLERS ================= */
 
@@ -283,76 +304,91 @@ export default function Home() {
     if (!montoInicial || Number(montoInicial) <= 0) return;
 
     try {
+      console.log("📤 Enviando datos:", {
+        monto_inicial: Number(montoInicial),
+        sucursal: sucursalActiva
+      });
+
       const res = await fetch("/api/dashboard/caja", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           monto_inicial: Number(montoInicial),
-          sucursal_id: (session?.user as SessionUser)?.sucursal_id
+          sucursal: sucursalActiva
         })
       });
 
       const json = await res.json();
+      console.log("📥 Respuesta:", { status: res.status, ok: res.ok, data: json });
 
       if (!res.ok && json.error?.includes("Ya existe")) {
-        await sincronizarCaja();
+        console.log("Caja ya existía, sincronizando...");
+        
+        await sincronizarCaja(sucursalActiva!);
         setModalMontoInicial(false);
         return;
       }
 
-      if (!res.ok) {
+      if (res.ok) {
+        await sincronizarCaja(sucursalActiva!);
+        setModalMontoInicial(false);
+        
+        addNotificacion(
+          "Caja Abierta",
+          `Caja aperturada con $${Number(montoInicial).toLocaleString('es-MX')}`,
+          'caja',
+          '/'
+        );
+      } else {
         alert(json.error || "Error al abrir caja");
-        return;
       }
-
-      // Esperar sincronización real
-      await sincronizarCaja();
-      setModalMontoInicial(false);
 
     } catch (error) {
       console.error("Error al abrir caja:", error);
       alert("Error de conexión al abrir caja");
     }
   };
-
-  const handlerActualizar = async () => {
-    try {
-      if (!cajaId) {
-        alert("No hay caja activa");
-        return;
-      }
-
-      const body: any = { id: cajaId };
-
-      if (tabCaja === "inicial") {
-        body.monto_inicial = Number(montoInicial);
-      }
-
-      if (tabCaja === "final") {
-        body.monto_final = Number(montoFinal);
-      }
-
-      const res = await fetch("/api/dashboard/caja", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        alert(json.error || "Error al actualizar caja");
-        return;
-      }
-
-      setModalActualizarCaja(false);
-      await sincronizarCaja();
-
-    } catch (error) {
-      console.error("Error al actualizar:", error);
-      alert("Error al actualizar caja");
+const handlerActualizar = async () => {
+  try {
+    if (!cajaId) {
+      alert("No hay caja activa");
+      return;
     }
-  };
+
+    const body: any = { id: cajaId };
+
+    if (tabCaja === "inicial") {
+      body.monto_inicial = Number(montoInicial);
+    }
+
+    if (tabCaja === "final") {
+      body.monto_final = Number(montoFinal);
+    }
+
+    const res = await fetch("/api/dashboard/caja", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.error || "Error al actualizar caja");
+      return;
+    }
+
+    // ✅ Cerrar modal inmediatamente
+    setModalActualizarCaja(false);
+
+    // ✅ Sincronizar datos reales
+    await sincronizarCaja(sucursalActiva!);
+
+  } catch (error) {
+    console.error("Error al actualizar:", error);
+    alert("Error al actualizar caja");
+  }
+};
 
   const handleCambioSucursal = async (nuevaSucursal: string) => {
     setSucursalActiva(nuevaSucursal);
@@ -365,35 +401,24 @@ export default function Home() {
     setMontoInicial(0);
     setMontoFinal(0);
 
-    await fetchDashboardData();
+    await fetchDashboardData(nuevaSucursal);
   };
 
   const handlerFinalizar = async () => {
     try {
-      if (!cajaId) {
-        alert("No hay caja activa");
-        return;
-      }
+      const caja = await obtenerCajaActual();
 
-      if (!montoFinal || Number(montoFinal) <= 0) {
-        alert("Ingresa un monto final válido");
-        return;
-      }
+      if (caja) {
+        if (!montoFinal || Number(montoFinal) <= 0) return;
 
-      const res = await fetch("/api/dashboard/caja", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: cajaId,
-          monto_final: Number(montoFinal)
-        })
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        alert(json.error || "Error al cerrar caja");
-        return;
+        await fetch("/api/dashboard/caja", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: caja.id,
+            monto_final: Number(montoFinal)
+          })
+        });
       }
 
       const keys = Object.keys(sessionStorage);
@@ -403,20 +428,18 @@ export default function Home() {
         }
       });
 
-      setModalMontoFinal(false);
-      
       setTimeout(() => {
         signOut({ callbackUrl: "/login" });
       }, 500);
       
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
-      alert("Error al cerrar caja");
     }
   };
 
   const handleCerrarSesion = async () => {
-    if (cajaId && montoInicial !== "" && montoFinal !== "" && Number(montoFinal) === Number(montoInicial)) {
+    const caja = await obtenerCajaActual();
+    if (caja && Number(caja.monto_final) === 0) {
       setModalMontoFinal(true);
     } else {
       const keys = Object.keys(sessionStorage);
@@ -486,6 +509,10 @@ export default function Home() {
                   {sucursalActiva || "Cargando..."}
                 </span>
               )}
+              {/* DEBUG: muestra la sucursal real */}
+              <span className="text-[6px] text-gray-300 mt-1">
+                ID: {sucursalActiva}
+              </span>
             </div>
           </div>
 
@@ -582,13 +609,11 @@ export default function Home() {
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Caja Inicial</p>
                 <p className="text-lg font-bold text-slate-800">
-                  {montoInicial !== "" && montoInicial !== null 
-                    ? `$${Number(montoInicial).toLocaleString("es-MX")}` 
-                    : "—"}
+                  {montoInicial && Number(montoInicial) > 0 ? `$${Number(montoInicial).toLocaleString("es-MX")}` : '—'}
                 </p>
               </div>
             </div>
-            {montoInicial !== "" && montoInicial !== null && Number(montoInicial) > 0 && (
+            {montoInicial && Number(montoInicial) > 0 && (
               <button 
                 onClick={() => { setTabCaja("inicial"); setModalActualizarCaja(true); }}
                 className="p-2 text-slate-300 hover:text-blue-600 transition-colors"
@@ -607,13 +632,11 @@ export default function Home() {
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Caja Final</p>
                 <p className="text-lg font-bold text-slate-800">
-                  {montoFinal !== "" && montoFinal !== null 
-                    ? `$${Number(montoFinal).toLocaleString("es-MX")}` 
-                    : "—"}
+                  {montoFinal && Number(montoFinal) > 0 ? `$${Number(montoFinal).toLocaleString("es-MX")}` : '—'}
                 </p>
               </div>
             </div>
-            {montoFinal !== "" && montoFinal !== null && Number(montoFinal) > 0 && (
+            {montoFinal && Number(montoFinal) > 0 && (
               <button 
                 onClick={() => { setTabCaja("final"); setModalActualizarCaja(true); }}
                 className="p-2 text-slate-300 hover:text-purple-600 transition-colors"
