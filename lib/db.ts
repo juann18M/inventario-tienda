@@ -5,11 +5,17 @@ declare global {
   var mysqlPool: mysql.Pool | undefined;
 }
 
-// Configuración mejorada para soportar tanto URL de la nube como objeto local
 export const db =
   global.mysqlPool ??
   (process.env.DATABASE_URL
-    ? mysql.createPool(process.env.DATABASE_URL)
+    ? mysql.createPool({
+        uri: process.env.DATABASE_URL,
+        ssl: {
+          rejectUnauthorized: true,
+        },
+        waitForConnections: true,
+        connectionLimit: 5,
+      })
     : mysql.createPool({
         host: "localhost",
         user: "root",
