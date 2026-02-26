@@ -1,18 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Agregar useEffect
 import { useRouter } from "next/navigation";
 import { 
   User, Mail, Lock, Building, ArrowRight, 
   Loader2, Eye, EyeOff, ChevronDown, Check, AlertCircle
 } from "lucide-react";
 
-const SUCURSALES = [
-  { id: 1, nombre: "Centro Isidro Huarte 1" },
-  { id: 2, nombre: "Centro Isidro Huarte 2" },
-  { id: 3, nombre: "Santiago Tapia" },
-  { id: 4, nombre: "Guadalupe Victoria" },
-];
+// ELIMINA esta constante hardcodeada:
+// const SUCURSALES = [
+//   { id: 1, nombre: "Centro Isidro Huarte 1" },
+//   { id: 2, nombre: "Centro Isidro Huarte 2" },
+//   { id: 3, nombre: "Santiago Tapia" },
+//   { id: 4, nombre: "Guadalupe Victoria" },
+// ];
 
 export default function PaginaRegistro() {
   const router = useRouter();
@@ -26,6 +27,28 @@ export default function PaginaRegistro() {
   const [exito, setExito] = useState(false);
   const [error, setError] = useState("");
   const [emailExistente, setEmailExistente] = useState(false);
+  
+  // Nuevos estados para las sucursales
+  const [sucursales, setSucursales] = useState<any[]>([]);
+  const [cargandoSucursales, setCargandoSucursales] = useState(true);
+
+  // Cargar sucursales desde la API al montar el componente
+  useEffect(() => {
+    const cargarSucursales = async () => {
+      try {
+        const respuesta = await fetch('/api/sucursales');
+        const data = await respuesta.json();
+        setSucursales(data);
+      } catch (error) {
+        console.error('Error cargando sucursales:', error);
+        setError('Error al cargar las sucursales');
+      } finally {
+        setCargandoSucursales(false);
+      }
+    };
+
+    cargarSucursales();
+  }, []);
 
   const verificarEmailExistente = async (email: string): Promise<boolean> => {
     try {
@@ -68,7 +91,7 @@ export default function PaginaRegistro() {
 
     try {
       // Realizar el registro directamente
-      const respuesta = await fetch("/api/auth/register", {
+      const respuesta = await fetch("/api/auth/register", { // Nota: en tu código original es /api/register, aquí es /api/auth/register
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -111,6 +134,7 @@ export default function PaginaRegistro() {
     }
   }
 
+  // El resto del JSX se mantiene igual, pero actualiza el select de sucursales
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-zinc-50 to-zinc-100 flex flex-col items-center justify-center p-3 sm:p-4">
       
@@ -250,7 +274,7 @@ export default function PaginaRegistro() {
                 </div>
               </div>
 
-              {/* Campo Sucursal (condicional) */}
+              {/* Campo Sucursal (condicional) - AHORA CON DATOS DE LA API */}
               {rol === "empleado" && (
                 <div className="space-y-1 animate-in fade-in slide-in-from-top-2 duration-300">
                   <label className="text-[11px] font-medium text-zinc-700 uppercase ml-1 flex items-center gap-1">
@@ -263,10 +287,12 @@ export default function PaginaRegistro() {
                       value={sucursalId}
                       onChange={(e) => setSucursalId(Number(e.target.value))}
                       className="w-full bg-zinc-50 text-sm rounded-lg border border-zinc-300 px-3 py-2.5 pl-9 appearance-none focus:ring-1 focus:ring-black/20 focus:border-black outline-none transition-all duration-200 cursor-pointer disabled:cursor-not-allowed"
-                      disabled={cargando}
+                      disabled={cargando || cargandoSucursales}
                     >
-                      <option value="">Seleccionar sucursal...</option>
-                      {SUCURSALES.map(s => (
+                      <option value="">
+                        {cargandoSucursales ? "Cargando sucursales..." : "Seleccionar sucursal..."}
+                      </option>
+                      {sucursales.map((s: any) => (
                         <option key={s.id} value={s.id}>{s.nombre}</option>
                       ))}
                     </select>
@@ -289,7 +315,7 @@ export default function PaginaRegistro() {
               {/* Botón de registro */}
               <button
                 type="submit"
-                disabled={cargando || emailExistente}
+                disabled={cargando || emailExistente || cargandoSucursales}
                 className="w-full bg-black text-white h-10 rounded-lg text-xs font-bold hover:bg-zinc-800 active:scale-[0.99] transition-all duration-200 flex items-center justify-center gap-2 mt-1 disabled:opacity-70 disabled:cursor-not-allowed group"
               >
                 {cargando ? (
